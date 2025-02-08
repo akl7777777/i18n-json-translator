@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { Translator } from './translator';
+import { FileProcessor } from './utils/file-processor';
 import { TranslationConfig } from './types/config';
-// 使用 require 导入 package.json
-const { version } = require('../package.json') as { version: string };
+
+const version = '1.0.0';
 
 program
     .name('i18n-json-translator')
@@ -17,47 +17,57 @@ program
     .command('translate <file>')
     .description('Translate a JSON file to specified languages')
     .requiredOption('-t, --target <languages>', 'Target languages (comma-separated)')
-    .option('-p, --provider <provider>', 'Translation provider (openai/claude)', 'openai')
+    .option('-p, --provider <provider>', 'Translation provider (openai/claude/custom)', 'openai')
     .option('-m, --model <model>', 'Model to use for translation')
-    .option('-o, --output <dir>', 'Output directory', '.')
+    .option('-o, --output <dir>', 'Output directory', './translations')
+    .option('--custom-api-url <url>', 'Custom API URL for custom provider')
+    .option('--custom-api-key <key>', 'Custom API key for custom provider')
     .action(async (file: string, options) => {
         try {
+            // 构建翻译器配置
             const config: TranslationConfig = {
-                openaiApiKey: process.env.OPENAI_API_KEY,
-                anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-                provider: options.provider as 'openai' | 'claude',
+                provider: options.provider as 'openai' | 'claude' | 'custom',
                 model: options.model
             };
 
-            const translator = new Translator(config);
-            const inputPath = resolve(file);
-            const inputJson = JSON.parse(readFileSync(inputPath, 'utf8'));
-            const languages = options.target.split(',');
-            const outputDir = resolve(options.output);
-
-            console.log('Starting translation...');
-
-            for (const lang of languages) {
-                try {
-                    console.log(`Translating to ${lang}...`);
-                    const result = await translator.translateObject(inputJson, lang);
-                    const outputPath = `${outputDir}/${file.replace(/\.json$/, '')}_${lang}.json`;
-
-                    writeFileSync(
-                        outputPath,
-                        JSON.stringify(result, null, 2),
-                        'utf8'
-                    );
-
-                    console.log(`✓ Saved translation to: ${outputPath}`);
-                } catch (error) {
-                    console.error(`✗ Failed to translate to ${lang}:`, error.message);
-                }
+            // 根据提供者设置 API 密钥
+            if (options.provider === 'openai') {
+                config.openaiApiKey = process.env.OPENAI_API_KEY;
+            } else if (options.provider === 'claude') {
+                config.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+            } else if (options.provider === 'custom') {
+                config.customProvider = {
+                    apiUrl: options.customApiUrl || process.env.CUSTOM_API_URL || '',
+                    apiKey: options.customApiKey || process.env.CUSTOM_API_KEY || '',
+                    format: 'openai'
+                };
             }
 
-            console.log('Translation completed!');
+            const translator = new Translator(config);
+            const inputPath = resolve(file);
+            const outputDir = resolve(options.output);
+            const languages = options.target.split(',');
+
+            console.log('Starting translation...');
+            console.log(`Input file: ${inputPath}`);
+            console.log(`Output directory: ${outputDir}`);
+            console.log(`Target languages: ${languages.join(', ')}`);
+
+            // 处理翻译
+            const results = await FileProcessor.processTranslations(
+                inputPath,
+                outputDir,
+                translator,
+                languages
+            );
+
+            console.log('\nTranslation completed!');
+            console.log('\nOutput files:');
+            for (const [lang, path] of Object.entries(results)) {
+                console.log(`${lang}: ${path}`);
+            }
         } catch (error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error instanceof Error ? error.message : error);
             process.exit(1);
         }
     });

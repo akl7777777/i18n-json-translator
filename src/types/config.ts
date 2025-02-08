@@ -1,4 +1,10 @@
-export type Provider = 'openai' | 'claude';
+export type Provider = 'openai' | 'claude' | 'custom';
+
+export interface CustomProviderConfig {
+    apiUrl: string;
+    apiKey: string;
+    format: 'openai'; // 将来可以支持更多格式
+}
 
 export interface TranslationConfig {
     openaiApiKey?: string;
@@ -6,6 +12,7 @@ export interface TranslationConfig {
     provider?: Provider;
     model?: string;
     sourceLanguage?: string;
+    customProvider?: CustomProviderConfig;
 }
 
 export interface SupportedLanguage {

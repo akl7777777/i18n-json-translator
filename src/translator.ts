@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { CustomAPIClient } from './utils/custom-client';
 import {
     TranslationConfig,
     TranslationResult,
@@ -11,6 +12,7 @@ import { isChineseText, validateConfig, validateLanguageCode } from './utils';
 export class Translator {
     private readonly openaiClient?: OpenAI;
     private readonly anthropicClient?: Anthropic;
+    private readonly customClient?: CustomAPIClient;
     private readonly provider: Provider;
     private readonly model: string;
     private readonly sourceLanguage: string;
@@ -26,12 +28,12 @@ export class Translator {
             this.openaiClient = new OpenAI({
                 apiKey: config.openaiApiKey
             });
-        }
-
-        if (this.provider === 'claude' && config.anthropicApiKey) {
+        } else if (this.provider === 'claude' && config.anthropicApiKey) {
             this.anthropicClient = new Anthropic({
                 apiKey: config.anthropicApiKey
             });
+        } else if (this.provider === 'custom' && config.customProvider) {
+            this.customClient = new CustomAPIClient(config.customProvider);
         }
     }
 
