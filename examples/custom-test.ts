@@ -26,7 +26,7 @@ async function testCustomTranslation() {
   });
 
   // 2. 设置输入输出路径
-  const inputFile = join(projectRoot, 'examples', 'zh-CN.json');
+  const inputFile = join(projectRoot, 'examples', 'test-input.json');
   const outputDir = join(projectRoot, 'examples', 'translations');
 
   // 3. 定义目标语言

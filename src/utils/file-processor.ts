@@ -42,20 +42,37 @@ export class FileProcessor {
         batchDelay: 2000
     };
 
+    private static translationCache: Record<string, Record<string, string>> = {};
+    private static progress: Record<string, number> = {};
+    private static totalKeys = 0;
+
     /**
      * 初始化日志文件
      */
     private static initializeLogger(outputDir: string): void {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        this.logFilePath = path.join(outputDir, `translation-${timestamp}.log`);
-        
-        // 创建日志文件并写入头部信息
-        fs.writeFileSync(
-            this.logFilePath,
-            `Translation Log - Started at ${new Date().toLocaleString()}\n` +
-            '='.repeat(80) + '\n\n',
-            'utf8'
-        );
+        try {
+            // 确保输出目录存在
+            if (!fs.existsSync(outputDir)) {
+                fs.mkdirSync(outputDir, { recursive: true });
+            }
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            this.logFilePath = path.join(outputDir, `translation-${timestamp}.log`);
+            
+            // 创建日志文件并写入头部信息
+            fs.writeFileSync(
+                this.logFilePath,
+                `Translation Log - Started at ${new Date().toLocaleString()}\n` +
+                '='.repeat(80) + '\n\n',
+                'utf8'
+            );
+
+            this.log(`日志文件已创建: ${this.logFilePath}`, 'info');
+        } catch (error) {
+            console.error(chalk.red('Failed to initialize logger:', error));
+            // 如果无法创建日志文件，至少确保不会崩溃
+            this.logFilePath = '';
+        }
     }
 
     /**
@@ -80,8 +97,14 @@ export class FileProcessor {
                 console.log(chalk.blue(message));
         }
 
-        // 写入日志文件
-        fs.appendFileSync(this.logFilePath, logMessage);
+        // 只有在logFilePath存在时才写入文件
+        if (this.logFilePath) {
+            try {
+                fs.appendFileSync(this.logFilePath, logMessage);
+            } catch (error) {
+                console.error(chalk.red('Failed to write to log file:', error));
+            }
+        }
     }
 
     /**
@@ -159,6 +182,97 @@ export class FileProcessor {
         return count;
     }
 
+    /**
+     * 初始化缓存和进度
+     */
+    private static initializeProgress(inputData: Record<string, unknown>, languages: string[]): void {
+        this.translationCache = {};
+        this.progress = {};
+        this.totalKeys = this.countTranslatableKeys(inputData);
+        
+        languages.forEach(lang => {
+            this.progress[lang] = 0;
+        });
+
+        this.log(`总计需要翻译 ${this.totalKeys} 个键`, 'info');
+    }
+
+    /**
+     * 更新并显示进度
+     */
+    private static updateProgress(lang: string, completedKeys: number): void {
+        this.progress[lang] = completedKeys;
+        const percentage = ((completedKeys / this.totalKeys) * 100).toFixed(1);
+        this.log(`[${lang}] 进度: ${completedKeys}/${this.totalKeys} (${percentage}%)`, 'info');
+    }
+
+    /**
+     * 检查缓存中是否存在翻译
+     */
+    private static getCachedTranslation(text: string, lang: string): string | null {
+        return this.translationCache[lang]?.[text] || null;
+    }
+
+    /**
+     * 保存翻译到缓存
+     */
+    private static cacheTranslation(text: string, lang: string, translation: string): void {
+        if (!this.translationCache[lang]) {
+            this.translationCache[lang] = {};
+        }
+        this.translationCache[lang][text] = translation;
+    }
+
+    /**
+     * 翻译单个文本
+     */
+    private static async translateText(
+        translator: any,
+        text: string,
+        lang: string,
+        options: Required<TranslationOptions>
+    ): Promise<string> {
+        // 检查缓存
+        const cached = this.getCachedTranslation(text, lang);
+        if (cached) {
+            this.log(`[${lang}] 使用缓存翻译: "${text}" => "${cached}"`, 'info');
+            return cached;
+        }
+
+        // 翻译并缓存
+        const translation = await this.translateWithRetry(translator, text, lang, options);
+        this.cacheTranslation(text, lang, translation);
+        this.log(`[${lang}] 新翻译: "${text}" => "${translation}"`, 'success');
+        return translation;
+    }
+
+    /**
+     * 按语言翻译所有内容
+     */
+    private static async translateLanguage(
+        translator: any,
+        inputData: Record<string, unknown>,
+        lang: string,
+        options: Required<TranslationOptions>
+    ): Promise<Record<string, unknown>> {
+        const result: Record<string, unknown> = {};
+        let completedKeys = 0;
+
+        for (const [key, value] of Object.entries(inputData)) {
+            if (typeof value === 'string') {
+                result[key] = await this.translateText(translator, value, lang, options);
+                completedKeys++;
+                this.updateProgress(lang, completedKeys);
+            } else if (value && typeof value === 'object') {
+                result[key] = await this.translateLanguage(translator, value as Record<string, unknown>, lang, options);
+            } else {
+                result[key] = value;
+            }
+        }
+
+        return result;
+    }
+
     static async processTranslationsParallel(
         inputFile: string,
         outputDir: string,
@@ -166,129 +280,82 @@ export class FileProcessor {
         targetLanguages: string[],
         options?: TranslationOptions
     ): Promise<Record<string, string>> {
-        // 合并默认选项和用户配置
         const finalOptions = { ...this.DEFAULT_OPTIONS, ...options };
-        
-        // 初始化日志
-        this.initializeLogger(outputDir);
-        this.log(`Starting translation process`, 'info');
-        this.log(`Input file: ${inputFile}`, 'info');
-        this.log(`Output directory: ${outputDir}`, 'info');
-        this.log(`Target languages: ${targetLanguages.join(', ')}`, 'info');
-        this.log(`Configuration:`, 'info');
-        this.log(`  Max workers: ${finalOptions.maxWorkers}`, 'info');
-        this.log(`  Max retries: ${finalOptions.maxRetries}`, 'info');
-        this.log(`  Retry delay: ${finalOptions.retryDelay}ms`, 'info');
-        this.log(`  Retry multiplier: ${finalOptions.retryMultiplier}x`, 'info');
-        this.log(`  Batch delay: ${finalOptions.batchDelay}ms`, 'info');
-        this.log('=' .repeat(80), 'info');
-
-        // 创建输出目录
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-            this.log(`Created output directory: ${outputDir}`, 'info');
-        }
-
-        // 读取输入文件
         const inputData = this.readJsonFile(inputFile);
-        const totalKeys = this.countTranslatableKeys(inputData);
+        
+        // 初始化进度和缓存
+        this.initializeProgress(inputData, targetLanguages);
+        
+        // 一次处理一个完整的语言文件
         const results: Record<string, string> = {};
-
-        this.log(`Found ${totalKeys} translatable keys`, 'info');
-
-        // 将语言分组前标准化语言代码
-        const normalizedLanguages = targetLanguages.map(lang => this.normalizeLanguageCode(lang));
-
-        // 创建所有语言的翻译任务
-        const translationTasks = normalizedLanguages.map(lang => ({
-            lang,
-            promise: new Promise<[string, string]>(async (resolve) => {
+        for (let i = 0; i < targetLanguages.length; i += finalOptions.maxWorkers) {
+            const batch = targetLanguages.slice(i, i + finalOptions.maxWorkers);
+            
+            this.log(`开始处理语言批次 ${Math.floor(i / finalOptions.maxWorkers) + 1}/${Math.ceil(targetLanguages.length / finalOptions.maxWorkers)}`, 'info');
+            
+            const batchPromises = batch.map(async lang => {
                 try {
-                    const startTime = Date.now();
-                    this.log(`Starting translation for ${lang}...`, 'info');
+                    const normalizedLang = this.normalizeLanguageCode(lang);
+                    this.log(`开始翻译 ${normalizedLang}...`, 'info');
                     
-                    const translatedData = await this.translateWithRetry(
+                    const translatedData = await this.translateLanguage(
                         translator,
                         inputData,
-                        lang,
+                        normalizedLang,
                         finalOptions
                     );
 
-                    if (!translatedData) {
-                        throw new Error(`Empty translation result for ${lang}`);
-                    }
-
-                    const outputPath = this.saveTranslation(outputDir, lang, translatedData);
-                    const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
-
-                    this.log(`✓ ${lang} translation completed in ${timeTaken}s`, 'success');
-                    resolve([lang, outputPath]);
+                    const outputPath = this.saveTranslation(outputDir, normalizedLang, translatedData);
+                    this.log(`✓ ${normalizedLang} 翻译完成并保存`, 'success');
+                    
+                    return [normalizedLang, outputPath];
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : String(error);
-                    this.log(`✗ ${lang} translation failed: ${errorMessage}`, 'error');
-                    resolve([lang, `ERROR: ${errorMessage}`]);
-                }
-            })
-        }));
-
-        // 分批执行翻译任务
-        for (let i = 0; i < translationTasks.length; i += finalOptions.maxWorkers) {
-            const batch = translationTasks.slice(i, i + finalOptions.maxWorkers);
-            this.log(`Processing batch ${Math.floor(i / finalOptions.maxWorkers) + 1}/${Math.ceil(translationTasks.length / finalOptions.maxWorkers)}`, 'info');
-            
-            const batchResults = await Promise.all(batch.map(task => task.promise));
-            
-            // 处理批次结果
-            batchResults.forEach(([lang, path]) => {
-                if (path.startsWith('ERROR:')) {
-                    this.log(`Failed to process ${lang}: ${path.substring(7)}`, 'error');
-                } else {
-                    results[lang] = path;
-                    this.log(`Successfully saved ${lang} translation to ${path}`, 'success');
+                    this.log(`✗ ${lang} 翻译失败: ${errorMessage}`, 'error');
+                    return [lang, `ERROR: ${errorMessage}`];
                 }
             });
 
-            // 如果还有下一批，添加延迟
-            if (i + finalOptions.maxWorkers < translationTasks.length) {
-                this.log(`Waiting ${finalOptions.batchDelay}ms before next batch...`, 'info');
+            const batchResults = await Promise.all(batchPromises);
+            batchResults.forEach(([lang, path]) => {
+                if (!path.startsWith('ERROR:')) {
+                    results[lang] = path;
+                }
+            });
+
+            // 批次间延迟
+            if (i + finalOptions.maxWorkers < targetLanguages.length) {
+                this.log(`等待 ${finalOptions.batchDelay}ms 后处理下一批...`, 'info');
                 await new Promise(resolve => setTimeout(resolve, finalOptions.batchDelay));
             }
         }
 
-        // 输出汇总信息
-        const successCount = Object.keys(results).length;
-        const failCount = targetLanguages.length - successCount;
-        
-        this.log('\nTranslation Summary:', 'info');
-        this.log(`✓ Successful: ${successCount} languages`, 'success');
-        if (failCount > 0) {
-            this.log(`✗ Failed: ${failCount} languages`, 'error');
-            this.log(`Check translation_errors.json for details`, 'warning');
-        }
-        this.log(`Log file: ${this.logFilePath}`, 'info');
-        this.log('=' .repeat(80), 'info');
+        // 输出缓存统计
+        const totalCached = Object.values(this.translationCache)
+            .reduce((sum, langCache) => sum + Object.keys(langCache).length, 0);
+        this.log(`翻译缓存统计: ${totalCached} 条记录`, 'info');
 
         return results;
     }
 
     private static async translateWithRetry(
         translator: any,
-        inputData: Record<string, unknown>,
+        text: string,
         lang: string,
         options: Required<TranslationOptions>
-    ): Promise<TranslationResult> {
+    ): Promise<string> {
         let currentDelay = options.retryDelay;
 
         for (let attempt = 1; attempt <= options.maxRetries; attempt++) {
             try {
-                this.log(`[${lang}] 尝试翻译 (第 ${attempt}/${options.maxRetries} 次)`, 'info');
-                const translatedData = await translator.translateObject(inputData, lang);
+                this.log(`[${lang}] 尝试翻译文本: "${text}" (第 ${attempt}/${options.maxRetries} 次)`, 'info');
+                const translation = await translator.translateText(text, lang);
                 
-                if (!translatedData || typeof translatedData !== 'object') {
+                if (!translation || typeof translation !== 'string') {
                     throw new Error('翻译结果无效');
                 }
 
-                return translatedData;
+                return translation;
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : '未知错误';
                 this.log(`[${lang}] 第 ${attempt} 次尝试失败: ${errorMessage}`, 'error');
