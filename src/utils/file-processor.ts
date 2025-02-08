@@ -99,16 +99,34 @@ export class FileProcessor {
         translator: any,
         inputData: Record<string, unknown>,
         lang: string,
-        retryCount: number,
-        retryDelay: number
+        retryCount = 3,
+        retryDelay = 2000
     ): Promise<TranslationResult | null> {
-        for (let attempt = 0; attempt < retryCount; attempt++) {
+        for (let attempt = 1; attempt <= retryCount; attempt++) {
             try {
+                console.log(chalk.blue(`[${lang}] 尝试翻译 (第 ${attempt}/${retryCount} 次)`));
                 const translatedData = await translator.translateObject(inputData, lang);
+                
+                // 验证翻译结果
+                if (!translatedData || typeof translatedData !== 'object') {
+                    throw new Error('翻译结果无效');
+                }
+
                 return translatedData;
             } catch (error) {
-                console.error(chalk.yellow(`Attempt ${attempt + 1} failed. Retrying in ${retryDelay}ms...`));
-                await new Promise(resolve => setTimeout(resolve, retryDelay));
+                const errorMessage = error instanceof Error ? error.message : '未知错误';
+                console.error(chalk.yellow(`[${lang}] 第 ${attempt} 次尝试失败: ${errorMessage}`));
+                
+                // 如果还有重试机会，等待后继续
+                if (attempt < retryCount) {
+                    console.log(chalk.gray(`[${lang}] 等待 ${retryDelay}ms 后重试...`));
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    // 每次重试增加延迟时间
+                    retryDelay *= 1.5;
+                } else {
+                    console.error(chalk.red(`[${lang}] 已达到最大重试次数 (${retryCount}次)`));
+                    throw new Error(`翻译失败 (${errorMessage})`);
+                }
             }
         }
         return null;
