@@ -75,19 +75,69 @@ const translator = new Translator({
 const result = await translator.translateObject(input, 'en');
 ```
 
-### File-based Processing
+### Parallel Processing
+
+支持并行处理多语言翻译，可以显著提高翻译效率：
 
 ```typescript
 import { FileProcessor } from 'i18n-json-translator/utils';
 
-// Process an entire JSON file
-const results = await FileProcessor.processTranslations(
+// 使用并行处理，maxWorkers 控制最大并行数
+const results = await FileProcessor.processTranslationsParallel(
   'input.json',
   'output-directory',
   translator,
-  ['en', 'ja', 'ko']
+  ['en', 'ja', 'ko'],
+  3  // maxWorkers: 最大并行数
 );
 ```
+
+也可以通过环境变量控制并行数：
+```bash
+# 在 .env 文件中设置
+MAX_WORKERS=3
+```
+
+### Testing Custom API
+
+1. 创建测试配置文件：
+```bash
+# 创建 .env 文件
+cp .env.example .env
+
+# 配置必要的环境变量
+CUSTOM_API_URL=your-api-endpoint
+CUSTOM_API_KEY=your-api-key
+MAX_WORKERS=3           # 可选：控制并行处理数量
+TARGET_LANGS=en,ja,ko  # 可选：指定目标语言
+MODEL=your-model-name  # 可选：指定模型
+```
+
+2. 准备测试数据：
+```bash
+# 在 examples 目录下创建测试用的中文 JSON 文件
+cp examples/test-input.json examples/zh-CN.json
+```
+
+3. 运行测试：
+```bash
+# 使用 npm 脚本运行测试
+npm run test:custom
+
+# 或直接运行测试文件
+node --loader ts-node/esm examples/custom-test.ts
+```
+
+### Language Code Support
+
+支持多种语言代码格式：
+
+| 标准代码 | 别名  | 语言    |
+|---------|-------|---------|
+| ko      | kr    | 韩语    |
+| ja      | jp    | 日语    |
+| zh-CN   | cn    | 简体中文 |
+| zh-TW   | tw    | 繁体中文 |
 
 ## Supported Languages
 
