@@ -2,11 +2,13 @@
   "name": "i18n-json-translator",
   "version": "1.0.0",
   "description": "A tool for translating JSON files with nested Chinese values into multiple languages using AI",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "jest",
+    "test:custom": "./scripts/run-test.sh",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepare": "husky install",
@@ -38,15 +40,17 @@
     "i18n-json-translator": "./dist/cli.js"
   },
   "dependencies": {
+    "openai": "^4.0.0",
     "@anthropic-ai/sdk": "^0.16.0",
-    "chalk": "^5.0.0",
+    "dotenv": "^16.0.0",
     "commander": "^11.0.0",
-    "dotenv": "^16.4.7",
-    "openai": "^4.0.0"
+    "chalk": "^5.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",
     "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "rimraf": "^5.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",

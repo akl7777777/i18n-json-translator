@@ -11,16 +11,34 @@ export function isChineseText(text: string): boolean {
  * Validate translation configuration
  */
 export function validateConfig(config: TranslationConfig): void {
-    if (!config.openaiApiKey && !config.anthropicApiKey) {
-        throw new Error('Either OpenAI or Anthropic API key must be provided');
+    // 检查自定义提供者配置
+    if (config.provider === 'custom') {
+        if (!config.customProvider?.apiKey || !config.customProvider?.apiUrl) {
+            throw new Error('Custom provider requires both API key and URL');
+        }
+        return;
     }
 
-    if (config.provider === 'openai' && !config.openaiApiKey) {
-        throw new Error('OpenAI API key is required when using OpenAI provider');
+    // 检查 OpenAI 和 Anthropic 配置
+    if (config.provider === 'openai') {
+        if (!config.openaiApiKey) {
+            throw new Error('OpenAI API key is required when using OpenAI provider');
+        }
+        return;
     }
 
-    if (config.provider === 'claude' && !config.anthropicApiKey) {
-        throw new Error('Anthropic API key is required when using Claude provider');
+    if (config.provider === 'claude') {
+        if (!config.anthropicApiKey) {
+            throw new Error('Anthropic API key is required when using Claude provider');
+        }
+        return;
+    }
+
+    // 如果没有指定提供者，检查是否至少提供了一个 API key
+    if (!config.provider) {
+        if (!config.openaiApiKey && !config.anthropicApiKey && !config.customProvider) {
+            throw new Error('At least one API provider configuration must be provided');
+        }
     }
 }
 
