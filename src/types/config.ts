@@ -29,3 +29,8 @@ export interface TranslationError extends Error {
     code: string;
     details?: unknown;
 }
+
+export interface ITranslator {
+    translateObject(obj: Record<string, unknown>, targetLang: string): Promise<TranslationResult>;
+    getModel(): string;
+}

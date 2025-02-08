@@ -5,11 +5,12 @@ import {
     TranslationConfig,
     TranslationResult,
     TranslationError,
-    Provider
+    Provider,
+    ITranslator
 } from './types/config';
 import { isChineseText, validateConfig, validateLanguageCode } from './utils';
 
-export class Translator {
+export class Translator implements ITranslator {
     private readonly openaiClient?: OpenAI;
     private readonly anthropicClient?: Anthropic;
     private readonly customClient?: CustomAPIClient;
@@ -62,6 +63,13 @@ export class Translator {
         }
 
         return result;
+    }
+
+    /**
+     * Get current model configuration
+     */
+    public getModel(): string {
+        return this.model;
     }
 
     private async translateText(text: string, targetLang: string): Promise<string> {

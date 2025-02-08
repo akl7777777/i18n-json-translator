@@ -18,7 +18,7 @@ async function testCustomTranslation() {
       apiKey: process.env.CUSTOM_API_KEY || 'your-api-key-here',
       format: 'openai'
     },
-    model: 'gpt-3.5-turbo'
+    model: process.env.MODEL || 'gpt-4o-mini' // 从环境变量获取模型配置，默认使用 gpt-4o-mini
   });
 
   // 2. 设置输入输出路径
@@ -26,7 +26,8 @@ async function testCustomTranslation() {
   const outputDir = path.join(projectRoot, 'examples', 'translations');
 
   // 3. 定义目标语言
-  const targetLanguages = ['en', 'ja', 'ko'];
+  const targetLanguages = process.env.TARGET_LANGS ?
+    process.env.TARGET_LANGS.split(',') : ['en', 'ja', 'ko']; // 可以从环境变量配置目标语言
 
   try {
     // 4. 处理翻译
@@ -34,6 +35,7 @@ async function testCustomTranslation() {
     console.log('Input file:', inputFile);
     console.log('Output directory:', outputDir);
     console.log('Target languages:', targetLanguages.join(', '));
+    console.log('Using model:', translator.getModel()); // 添加模型信息的输出
 
     const results = await FileProcessor.processTranslations(
       inputFile,
