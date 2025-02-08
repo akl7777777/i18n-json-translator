@@ -113,17 +113,40 @@ export class FileProcessor {
     }
 
     /**
-     * 标准化语言代码
+     * 仅在内部翻译时标准化语言代码
      */
     private static normalizeLanguageCode(code: string): string {
         const languageMap: Record<string, string> = {
-            'jp': 'ja',    // 日语
-            'kr': 'ko',    // 韩语
-            'cn': 'zh',    // 中文
-            // 可以添加更多映射
+            // 日韩语言
+            'jp': 'ja',     // 日语
+            'kr': 'ko',     // 韩语
+            
+            // 简体中文
+            'cn': 'zh',     // 简体中文
+            'zh-cn': 'zh',  // 简体中文（中国大陆）
+            'chs': 'zh-Hans', // 简体中文（通用）
+            
+            // 繁体中文
+            'tw': 'zh-TW',  // 繁体中文（台湾）
+            'hk': 'zh-HK',  // 繁体中文（香港）
+            'mo': 'zh-MO',  // 繁体中文（澳门）
+            'cht': 'zh-Hant', // 繁体中文（通用）
+            
+            // 保持原有大小写
+            'zh-CN': 'zh',
+            'zh-TW': 'zh-TW',
+            'zh-HK': 'zh-HK',
+            'zh-MO': 'zh-MO',
+            'zh-Hans': 'zh-Hans',
+            'zh-Hant': 'zh-Hant'
         };
 
-        // 仅在需要时转换语言代码，用于API调用
+        // 如果是大写形式的语言代码，保持原样
+        if (code === code.toUpperCase()) {
+            return languageMap[code] || code;
+        }
+        
+        // 其他情况转换为小写
         return languageMap[code.toLowerCase()] || code.toLowerCase();
     }
 
