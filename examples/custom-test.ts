@@ -1,5 +1,5 @@
 import { Translator } from '../src/index.js';
-import { FileProcessor } from '../src/utils/file-processor.js';
+import { FileProcessor, TranslationOptions } from '../src/utils/file-processor.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import * as dotenv from 'dotenv';
@@ -31,27 +31,35 @@ async function testCustomTranslation() {
 
   // 3. 定义目标语言
   const targetLanguages = process.env.TARGET_LANGS ?
-    process.env.TARGET_LANGS.split(',') : ['en', 'ja', 'ko']; // 可以从环境变量配置目标语言
+    process.env.TARGET_LANGS.split(',') : ['en', 'ja', 'ko'];
 
   try {
-    // 4. 处理翻译
+    // 4. 设置翻译选项
+    const options: TranslationOptions = {
+      maxWorkers: Number(process.env.MAX_WORKERS) || 3,
+      maxRetries: Number(process.env.MAX_RETRIES) || 3,
+      retryDelay: Number(process.env.RETRY_DELAY) || 2000,
+      retryMultiplier: Number(process.env.RETRY_MULTIPLIER) || 1.5,
+      batchDelay: Number(process.env.BATCH_DELAY) || 2000
+    };
+
+    // 5. 处理翻译
     console.log('Starting translation...');
     console.log('Input file:', inputFile);
     console.log('Output directory:', outputDir);
     console.log('Target languages:', targetLanguages.join(', '));
-    console.log('Using model:', translator.getModel()); // 添加模型信息的输出
+    console.log('Using model:', translator.getModel());
+    console.log('Translation options:', JSON.stringify(options, null, 2));
 
-    // 使用并行处理方法，设置最大并行数为3（可以通过环境变量配置）
-    const maxWorkers = Number(process.env.MAX_WORKERS) || 3;
     const results = await FileProcessor.processTranslationsParallel(
       inputFile,
       outputDir,
       translator,
       targetLanguages,
-      maxWorkers
+      options
     );
 
-    // 5. 打印结果
+    // 6. 打印结果
     console.log('\nTranslation completed!');
     console.log('\nOutput files:');
     for (const [lang, filePath] of Object.entries(results)) {
