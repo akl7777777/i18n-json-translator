@@ -12,6 +12,7 @@ export interface RetryOptions {
 export interface TranslationOptions extends RetryOptions {
   maxWorkers?: number;    // 最大并行工作线程数
   batchDelay?: number;    // 批次间延迟(ms)
+    requestTimeout?: number; // 单个请求超时时间(ms)
 }
 
 export interface BatchProcessingOptions {
@@ -39,7 +40,8 @@ export class FileProcessor {
         maxRetries: 3,
         retryDelay: 2000,
         retryMultiplier: 1.5,
-        batchDelay: 2000
+        batchDelay: 2000,
+        requestTimeout: 30000 // 默认30秒超时
     };
 
     private static translationCache: Record<string, Record<string, string>> = {};
@@ -243,12 +245,23 @@ export class FileProcessor {
         } else {
             this.activeRequests.delete(requestId);
         }
-
-        // 显示当前活跃请求状态
+        
+        // 只显示活跃请求数量，不显示具体ID
         const activeCount = this.activeRequests.size;
         if (activeCount > 0) {
-            this.log(`[${lang}] 当前活跃请求: ${activeCount}个 (${Array.from(this.activeRequests).join(', ')})`, 'info');
+            this.log(`[${lang}] 当前活跃请求: ${activeCount}个`, 'info');
         }
+    }
+
+    private static async handleRequestTimeout<T>(
+        promise: Promise<T>,
+        timeout: number,
+        errorMessage: string
+    ): Promise<T> {
+        const timeoutPromise = new Promise<T>((_, reject) => {
+            setTimeout(() => reject(new Error(errorMessage)), timeout);
+        });
+        return Promise.race([promise, timeoutPromise]);
     }
 
     /**
@@ -262,11 +275,15 @@ export class FileProcessor {
     ): Promise<string> {
         const requestId = `Request-${Math.random().toString(36).substr(2, 9)}`;
         this.updateActiveRequests(requestId, true, lang);
-
+        
         try {
             this.log(`[${lang}] 尝试翻译文本: "${text}" (第 1/${options.maxRetries} 次)`, 'info');
-            const translation = await translator.translateText(text, lang);
-
+            const translation = await this.handleRequestTimeout(
+                translator.translateText(text, lang),
+                options.requestTimeout,
+                `请求 ${requestId} 超时`
+            );
+            
             if (!translation || typeof translation !== 'string') {
                 throw new Error('翻译结果无效');
             }
@@ -291,13 +308,24 @@ export class FileProcessor {
         const result: TranslationResult = {};
         let completedKeys = 0;
         const entries = Object.entries(inputData);
-
+        
         // 创建一个队列来管理翻译任务
         const queue = entries.map(([key, value]) => ({ key, value }));
         const inProgress = new Set<Promise<any>>();
-
+        
         while (queue.length > 0 || inProgress.size > 0) {
-            // 显示队列状态
+            // 检查长时间未完成的请求
+            const stuckRequests = Array.from(this.activeRequests).filter(id => {
+                const requestTime = id.split('-')[1];
+                return Date.now() - parseInt(requestTime) > options.requestTimeout;
+            });
+
+            if (stuckRequests.length > 0) {
+                this.log(`[${lang}] 发现 ${stuckRequests.length} 个超时请求，已强制结束`, 'warning');
+                stuckRequests.forEach(id => this.activeRequests.delete(id));
+            }
+
+            // 显示队列状态（简化版）
             if (queue.length > 0 || inProgress.size > 0) {
                 this.log(`[${lang}] 剩余任务: ${queue.length}个, 进行中: ${inProgress.size}个`, 'info');
             }
@@ -305,11 +333,11 @@ export class FileProcessor {
             // 填充进行中的任务，直到达到最大并发数
             while (queue.length > 0 && inProgress.size < options.maxWorkers) {
                 const { key, value } = queue.shift()!;
-
+                
                 const promise = (async () => {
                     try {
                         let translatedValue: string | TranslationResult;
-
+                        
                         if (typeof value === 'string') {
                             // 检查缓存
                             const cached = this.getCachedTranslation(value, lang);
@@ -333,24 +361,30 @@ export class FileProcessor {
                         } else {
                             translatedValue = String(value);
                         }
-
+                        
                         result[key] = translatedValue;
                     } catch (error) {
                         this.log(`[${lang}] 键 "${key}" 翻译失败: ${error}`, 'error');
                         result[key] = `[TRANSLATION_FAILED] ${value}`;
                     }
                 })();
-
+                
                 inProgress.add(promise);
                 promise.finally(() => {
                     inProgress.delete(promise);
                 });
             }
-
+            
             // 等待任意一个任务完成
             if (inProgress.size > 0) {
                 await Promise.race(Array.from(inProgress));
             }
+        }
+
+        // 检查是否有未完成的请求
+        if (this.activeRequests.size > 0) {
+            this.log(`[${lang}] 有 ${this.activeRequests.size} 个请求未完成，已强制结束`, 'warning');
+            this.activeRequests.clear();
         }
 
         this.log(`[${lang}] 所有键翻译完成，共 ${completedKeys} 个`, 'success');
