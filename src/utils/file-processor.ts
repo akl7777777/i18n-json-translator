@@ -45,6 +45,7 @@ export class FileProcessor {
     private static translationCache: Record<string, Record<string, string>> = {};
     private static progress: Record<string, number> = {};
     private static totalKeys = 0;
+    private static processedLanguages: Set<string> = new Set();
 
     /**
      * 初始化日志文件
@@ -183,27 +184,37 @@ export class FileProcessor {
     }
 
     /**
-     * 初始化缓存和进度
+     * 初始化进度
      */
     private static initializeProgress(inputData: Record<string, unknown>, languages: string[]): void {
         this.translationCache = {};
         this.progress = {};
         this.totalKeys = this.countTranslatableKeys(inputData);
+        this.processedLanguages.clear();
         
         languages.forEach(lang => {
             this.progress[lang] = 0;
         });
 
-        this.log(`总计需要翻译 ${this.totalKeys} 个键`, 'info');
+        this.log(`总计需要翻译 ${this.totalKeys} 个键，目标语言: ${languages.join(', ')}`, 'info');
     }
 
     /**
      * 更新并显示进度
      */
     private static updateProgress(lang: string, completedKeys: number): void {
+        if (this.processedLanguages.has(lang)) {
+            return; // 跳过已处理完的语言
+        }
+        
         this.progress[lang] = completedKeys;
         const percentage = ((completedKeys / this.totalKeys) * 100).toFixed(1);
         this.log(`[${lang}] 进度: ${completedKeys}/${this.totalKeys} (${percentage}%)`, 'info');
+        
+        if (completedKeys >= this.totalKeys) {
+            this.processedLanguages.add(lang);
+            this.log(`[${lang}] 翻译完成！`, 'success');
+        }
     }
 
     /**
@@ -300,20 +311,22 @@ export class FileProcessor {
         const finalOptions = { ...this.DEFAULT_OPTIONS, ...options };
         const inputData = this.readJsonFile(inputFile);
         
-        // 初始化日志
+        // 初始化日志和进度
         this.initializeLogger(outputDir);
-        
-        // 初始化进度和缓存
         this.initializeProgress(inputData, targetLanguages);
         
-        // 一次处理一个完整的语言文件
         const results: Record<string, string> = {};
         const normalizedLanguages = targetLanguages.map(lang => this.normalizeLanguageCode(lang));
         
         // 创建所有语言的翻译任务
         const translationPromises = normalizedLanguages.map(async lang => {
+            if (this.processedLanguages.has(lang)) {
+                this.log(`[${lang}] 已经处理过，跳过`, 'info');
+                return [lang, ''];
+            }
+
             try {
-                this.log(`开始翻译 ${lang}...`, 'info');
+                this.log(`[${lang}] 开始翻译...`, 'info');
                 
                 const translatedData = await this.translateLanguage(
                     translator,
@@ -322,14 +335,13 @@ export class FileProcessor {
                     finalOptions
                 );
 
-                // 这里 translatedData 现在是 TranslationResult 类型
                 const outputPath = this.saveTranslation(outputDir, lang, translatedData);
-                this.log(`✓ ${lang} 翻译完成并保存`, 'success');
+                this.log(`✓ [${lang}] 翻译完成并保存到: ${outputPath}`, 'success');
                 
                 return [lang, outputPath];
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                this.log(`✗ ${lang} 翻译失败: ${errorMessage}`, 'error');
+                this.log(`✗ [${lang}] 翻译失败: ${errorMessage}`, 'error');
                 return [lang, `ERROR: ${errorMessage}`];
             }
         });
@@ -339,11 +351,16 @@ export class FileProcessor {
         
         // 处理结果
         allResults.forEach(([lang, path]) => {
-            if (!path.startsWith('ERROR:')) {
+            if (path && !path.startsWith('ERROR:')) {
                 results[lang] = path;
             }
         });
 
+        // 输出最终统计
+        this.log('\n翻译任务完成！', 'success');
+        this.log(`成功翻译语言: ${Object.keys(results).join(', ')}`, 'success');
+        this.log(`缓存命中统计: ${Object.keys(this.translationCache).length} 个语言`, 'info');
+        
         return results;
     }
 
