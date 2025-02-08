@@ -15,6 +15,9 @@ A powerful tool for translating JSON files with nested Chinese values into multi
 - 🛡️ Written in TypeScript with full type support
 - 📁 File-based processing with batch translation support
 - 🔌 Support for custom API endpoints with OpenAI-compatible format
+- 🚀 Concurrent translation with configurable workers
+- ⏱️ Timeout handling and retry mechanism
+- 💾 Translation caching for efficiency
 
 ## Installation
 
@@ -156,29 +159,126 @@ node --loader ts-node/esm examples/custom-test.ts
 
 ## Configuration Options
 
+### Basic Options
+
 ```typescript
-interface TranslationConfig {
-  // OpenAI configuration
-  openaiApiKey?: string;
-  
-  // Anthropic configuration
-  anthropicApiKey?: string;
-  
-  // Custom API configuration
-  customProvider?: {
-    apiUrl: string;
-    apiKey: string;
-    format: 'openai';  // Currently supports OpenAI format
-  };
-  
-  // Provider selection
-  provider?: 'openai' | 'claude' | 'custom';
-  
-  // Model specification
-  model?: string;
-  
-  // Source language (default: 'zh')
-  sourceLanguage?: string;
+interface TranslationOptions {
+    maxWorkers?: number;      // 最大并行工作线程数，默认 5
+    maxRetries?: number;      // 失败重试次数，默认 3
+    retryDelay?: number;      // 重试延迟时间(ms)，默认 1000
+    retryMultiplier?: number; // 重试延迟倍数，默认 1.5
+    batchDelay?: number;      // 批次间延迟(ms)，默认 200
+    requestTimeout?: number;  // 单个请求超时时间(ms)，默认 30000
+}
+```
+
+### Advanced Usage
+
+```typescript
+import { Translator, FileProcessor } from 'i18n-json-translator';
+
+// 初始化翻译器
+const translator = new Translator({
+    provider: 'custom',
+    customProvider: {
+        apiUrl: 'your-api-endpoint',
+        apiKey: 'your-api-key',
+        format: 'openai'
+    },
+    model: 'your-model-name'
+});
+
+// 配置翻译选项
+const options = {
+    maxWorkers: 20,           // 并行处理20个请求
+    maxRetries: 5,            // 失败重试5次
+    retryDelay: 2000,         // 初始重试延迟2秒
+    retryMultiplier: 1.5,     // 每次重试延迟增加50%
+    batchDelay: 500,          // 批次间延迟500ms
+    requestTimeout: 30000     // 30秒超时
+};
+
+// 处理翻译
+const results = await FileProcessor.processTranslationsParallel(
+    'input.json',
+    'output-directory',
+    translator,
+    ['en', 'ja', 'ko'],
+    options
+);
+```
+
+### Environment Variables
+
+支持通过环境变量配置：
+
+```bash
+# API配置
+OPENAI_API_KEY=your-openai-key
+ANTHROPIC_API_KEY=your-anthropic-key
+CUSTOM_API_URL=your-api-url
+CUSTOM_API_KEY=your-api-key
+
+# 性能配置
+MAX_WORKERS=20              # 最大并行数
+REQUEST_TIMEOUT=30000       # 请求超时时间(ms)
+BATCH_DELAY=500            # 批次间延迟(ms)
+
+# 重试配置
+MAX_RETRIES=5              # 最大重试次数
+RETRY_DELAY=2000          # 重试延迟(ms)
+RETRY_MULTIPLIER=1.5      # 重试延迟倍数
+
+# 其他配置
+MODEL=your-model-name     # 模型名称
+TARGET_LANGS=en,ja,ko    # 目标语言
+```
+
+### Error Handling
+
+提供了详细的错误处理机制：
+
+```typescript
+try {
+    const results = await FileProcessor.processTranslationsParallel(
+        'input.json',
+        'output-directory',
+        translator,
+        ['en', 'ja', 'ko'],
+        options
+    );
+} catch (error) {
+    if (error instanceof TranslationError) {
+        console.error('翻译错误:', error.message);
+        console.error('失败的语言:', error.language);
+        console.error('详细信息:', error.details);
+    } else if (error instanceof TimeoutError) {
+        console.error('请求超时:', error.message);
+        console.error('超时请求ID:', error.requestId);
+    }
+}
+```
+
+### Performance Tips
+
+- `maxWorkers`: 建议根据API限制和系统资源设置，通常5-20之间
+- `requestTimeout`: 设置合理的超时时间，避免请求卡住
+- `batchDelay`: 可以根据API限制调整，避免请求过于密集
+- `retryDelay`: 失败重试时间建议从2秒开始，配合倍数增长
+
+### Output Structure
+
+输出文件会严格保持输入文件的结构和顺序：
+
+```json
+{
+    "message": {
+        "welcome": "Welcome",
+        "settings": {
+            "theme": "Theme",
+            "language": "Language"
+        }
+    }
 }
 ```
 
