@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { FileProcessor } from '../../src/utils/file-processor';
+import { FileProcessor, TranslationOptions } from '../../src/utils/file-processor';
 
 jest.mock('fs');
 const mockedFs = fs as jest.Mocked<typeof fs>;
@@ -9,6 +9,14 @@ describe('FileProcessor', () => {
   const sampleJson = {
     title: '测试',
     description: '这是一个测试'
+  };
+
+  const defaultOptions: TranslationOptions = {
+    maxWorkers: 3,
+    maxRetries: 3,
+    retryDelay: 2000,
+    retryMultiplier: 1.5,
+    batchDelay: 2000
   };
 
   beforeEach(() => {
@@ -79,7 +87,7 @@ describe('FileProcessor', () => {
     });
   });
 
-  describe('processTranslations', () => {
+  describe('processTranslationsParallel', () => {
     const mockTranslator = {
       translateObject: jest.fn()
     };
@@ -87,37 +95,118 @@ describe('FileProcessor', () => {
     beforeEach(() => {
       mockTranslator.translateObject.mockReset();
       mockedFs.readFileSync.mockReturnValue(JSON.stringify(sampleJson));
+      mockedFs.existsSync.mockReturnValue(true);
     });
 
-    it('should process all languages successfully', async () => {
+    it('should process all languages successfully with default options', async () => {
       mockTranslator.translateObject.mockImplementation((text) =>
         Promise.resolve({ ...text, translated: true })
       );
 
-      const results = await FileProcessor.processTranslations(
+      const results = await FileProcessor.processTranslationsParallel(
         'input.json',
         'output',
         mockTranslator,
-        ['en', 'ja']
+        ['en', 'ja'],
+        defaultOptions
       );
 
       expect(Object.keys(results)).toHaveLength(2);
       expect(mockTranslator.translateObject).toHaveBeenCalledTimes(2);
     });
 
-    it('should continue processing if one language fails', async () => {
-      mockTranslator.translateObject
-        .mockResolvedValueOnce({ ...sampleJson, translated: true })
-        .mockRejectedValueOnce(new Error('Translation failed'));
+    it('should handle retry logic correctly', async () => {
+      const customOptions: TranslationOptions = {
+        ...defaultOptions,
+        maxRetries: 2,
+        retryDelay: 100
+      };
 
-      const results = await FileProcessor.processTranslations(
+      mockTranslator.translateObject
+        .mockRejectedValueOnce(new Error('First attempt failed'))
+        .mockResolvedValueOnce({ ...sampleJson, translated: true });
+
+      const results = await FileProcessor.processTranslationsParallel(
         'input.json',
         'output',
         mockTranslator,
-        ['en', 'ja']
+        ['en'],
+        customOptions
       );
 
       expect(Object.keys(results)).toHaveLength(1);
+      expect(mockTranslator.translateObject).toHaveBeenCalledTimes(2);
+    });
+
+    it('should respect maxWorkers option', async () => {
+      const customOptions: TranslationOptions = {
+        ...defaultOptions,
+        maxWorkers: 1
+      };
+
+      mockTranslator.translateObject.mockImplementation((text) =>
+        Promise.resolve({ ...text, translated: true })
+      );
+
+      await FileProcessor.processTranslationsParallel(
+        'input.json',
+        'output',
+        mockTranslator,
+        ['en', 'ja', 'ko'],
+        customOptions
+      );
+
+      // 验证是否按批次处理
+      expect(mockTranslator.translateObject).toHaveBeenCalledTimes(3);
+    });
+
+    it('should handle language code aliases', async () => {
+      mockTranslator.translateObject.mockImplementation((text) =>
+        Promise.resolve({ ...text, translated: true })
+      );
+
+      const results = await FileProcessor.processTranslationsParallel(
+        'input.json',
+        'output',
+        mockTranslator,
+        ['kr', 'jp'], // 使用别名
+        defaultOptions
+      );
+
+      expect(Object.keys(results)).toHaveLength(2);
+      expect(mockTranslator.translateObject).toHaveBeenCalledWith(
+        expect.anything(),
+        'ko'
+      );
+      expect(mockTranslator.translateObject).toHaveBeenCalledWith(
+        expect.anything(),
+        'ja'
+      );
+    });
+
+    it('should create error log for failed translations', async () => {
+      const customOptions: TranslationOptions = {
+        ...defaultOptions,
+        maxRetries: 1
+      };
+
+      mockTranslator.translateObject.mockRejectedValue(
+        new Error('Translation failed')
+      );
+
+      await FileProcessor.processTranslationsParallel(
+        'input.json',
+        'output',
+        mockTranslator,
+        ['en'],
+        customOptions
+      );
+
+      expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('translation_errors.json'),
+        expect.stringContaining('Translation failed'),
+        'utf8'
+      );
     });
   });
 });
