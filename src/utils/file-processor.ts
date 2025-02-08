@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TranslationResult } from '../types/config';
 import chalk from 'chalk';
-import { Worker } from 'worker_threads';
 
 export interface BatchProcessingOptions {
   maxWorkers?: number;      // 最大并行工作线程数
@@ -13,6 +12,21 @@ export interface BatchProcessingOptions {
 }
 
 export class FileProcessor {
+    // 语言代码映射表
+    private static readonly LANGUAGE_CODE_ALIASES: Record<string, string> = {
+      'kr': 'ko',    // 韩语
+      'cn': 'zh-CN', // 简体中文
+      'tw': 'zh-TW', // 繁体中文
+      'jp': 'ja'     // 日语
+    };
+
+    /**
+     * 标准化语言代码
+     */
+    private static normalizeLanguageCode(code: string): string {
+      return this.LANGUAGE_CODE_ALIASES[code.toLowerCase()] || code;
+    }
+
     /**
      * 读取JSON文件
      */
@@ -41,17 +55,14 @@ export class FileProcessor {
       data: TranslationResult
     ): string {
         try {
-            // 确保输出目录存在
             if (!fs.existsSync(outputDir)) {
                 console.log(chalk.blue('Creating output directory:', outputDir));
                 fs.mkdirSync(outputDir, { recursive: true });
             }
 
-            // 生成输出文件路径
             const outputPath = path.join(outputDir, `${languageCode}.json`);
             console.log(chalk.blue('\nSaving translation to:', outputPath));
 
-            // 写入文件
             fs.writeFileSync(
               outputPath,
               JSON.stringify(data, null, 2),
@@ -84,69 +95,23 @@ export class FileProcessor {
         return count;
     }
 
-    // 语言代码映射表
-    private static readonly LANGUAGE_CODE_ALIASES: Record<string, string> = {
-      'kr': 'ko',    // 韩语
-      'cn': 'zh-CN', // 简体中文
-      'tw': 'zh-TW', // 繁体中文
-      'jp': 'ja'     // 日语
-    };
-
-    /**
-     * 标准化语言代码
-     */
-    private static normalizeLanguageCode(code: string): string {
-      return this.LANGUAGE_CODE_ALIASES[code.toLowerCase()] || code;
-    }
-
-    /**
-     * 批量处理翻译并保存
-     */
-    static async processTranslations(
-      inputFile: string,
-      outputDir: string,
-      translator: any,
-      targetLanguages: string[]
-    ): Promise<Record<string, string>> {
-        // 创建输出目录
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
-        // 读取输入文件
-        const inputData = this.readJsonFile(inputFile);
-        const totalKeys = this.countTranslatableKeys(inputData);
-        const results: Record<string, string> = {};
-
-        console.log(chalk.blue(`\nTotal translatable keys found: ${totalKeys}`));
-
-        // 对每种目标语言进行翻译
-        for (let i = 0; i < targetLanguages.length; i++) {
-            const lang = targetLanguages[i];
-            const startTime = Date.now();
-            console.log(chalk.yellow(`\n[${i + 1}/${targetLanguages.length}] Processing ${lang}...`));
-
+    private static async translateWithRetry(
+        translator: any,
+        inputData: Record<string, unknown>,
+        lang: string,
+        retryCount: number,
+        retryDelay: number
+    ): Promise<TranslationResult | null> {
+        for (let attempt = 0; attempt < retryCount; attempt++) {
             try {
-                console.log(chalk.blue(`Starting translation to ${lang}...`));
                 const translatedData = await translator.translateObject(inputData, lang);
-                const outputPath = this.saveTranslation(outputDir, lang, translatedData);
-                const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
-
-                results[lang] = outputPath;
-                console.log(chalk.green(`✓ ${lang} translation completed in ${timeTaken}s`));
+                return translatedData;
             } catch (error) {
-                console.error(chalk.red(`✗ Failed to translate to ${lang}:`, error));
-            }
-
-            // 如果不是最后一个语言，添加延迟以避免请求过快
-            if (i < targetLanguages.length - 1) {
-                const delay = 1000; // 1秒延迟
-                console.log(chalk.gray(`Waiting ${delay}ms before next language...`));
-                await new Promise(resolve => setTimeout(resolve, delay));
+                console.error(chalk.yellow(`Attempt ${attempt + 1} failed. Retrying in ${retryDelay}ms...`));
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
-
-        return results;
+        return null;
     }
 
     static async processTranslationsParallel(
@@ -154,7 +119,7 @@ export class FileProcessor {
       outputDir: string,
       translator: any,
       targetLanguages: string[],
-      maxWorkers = 3  // 最大并行数
+      maxWorkers = 3
     ): Promise<Record<string, string>> {
         // 创建输出目录
         if (!fs.existsSync(outputDir)) {
@@ -170,47 +135,55 @@ export class FileProcessor {
 
         // 将语言分组前标准化语言代码
         const normalizedLanguages = targetLanguages.map(lang => this.normalizeLanguageCode(lang));
-        const languageGroups: string[][] = [];
-        for (let i = 0; i < normalizedLanguages.length; i += maxWorkers) {
-            languageGroups.push(normalizedLanguages.slice(i, i + maxWorkers));
-        }
 
-        // 按组处理翻译
-        for (const group of languageGroups) {
-            const workerPromises = group.map(lang => {
-                return new Promise<[string, string]>(async (resolve, reject) => {
-                    try {
-                        const startTime = Date.now();
-                        console.log(chalk.yellow(`\n开始处理 ${lang}...`));
-                        
-                        const translatedData = await translator.translateObject(inputData, lang);
-                        const outputPath = this.saveTranslation(outputDir, lang, translatedData);
-                        const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
+        // 创建所有语言的翻译任务
+        const translationTasks = normalizedLanguages.map(lang => ({
+            lang,
+            promise: new Promise<[string, string]>(async (resolve) => {
+                try {
+                    const startTime = Date.now();
+                    console.log(chalk.yellow(`\n开始处理 ${lang}...`));
+                    
+                    const translatedData = await this.translateWithRetry(
+                        translator,
+                        inputData,
+                        lang,
+                        3,
+                        2000
+                    );
 
-                        console.log(chalk.green(`✓ ${lang} 翻译完成，耗时 ${timeTaken}s`));
-                        resolve([lang, outputPath]);
-                    } catch (error) {
-                        console.error(chalk.red(`✗ ${lang} 翻译失败:`, error));
-                        reject(error);
+                    if (!translatedData) {
+                        throw new Error(`翻译结果为空: ${lang}`);
                     }
-                });
-            });
 
-            // 等待当前组的所有翻译完成
-            const groupResults = await Promise.allSettled(workerPromises);
+                    const outputPath = this.saveTranslation(outputDir, lang, translatedData);
+                    const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
+
+                    console.log(chalk.green(`✓ ${lang} 翻译完成，耗时 ${timeTaken}s`));
+                    resolve([lang, outputPath]);
+                } catch (error) {
+                    console.error(chalk.red(`✗ ${lang} 翻译失败:`, error));
+                    resolve([lang, `ERROR: ${error.message}`]);
+                }
+            })
+        }));
+
+        // 分批执行翻译任务
+        for (let i = 0; i < translationTasks.length; i += maxWorkers) {
+            const batch = translationTasks.slice(i, i + maxWorkers);
+            const batchResults = await Promise.all(batch.map(task => task.promise));
             
-            // 处理结果
-            groupResults.forEach(result => {
-                if (result.status === 'fulfilled') {
-                    const [lang, path] = result.value;
+            // 处理批次结果
+            batchResults.forEach(([lang, path]) => {
+                if (!path.startsWith('ERROR:')) {
                     results[lang] = path;
                 }
             });
 
-            // 组间添加延迟以避免 API 限制
-            if (languageGroups.indexOf(group) < languageGroups.length - 1) {
-                const delay = 2000; // 2秒延迟
-                console.log(chalk.gray(`等待 ${delay}ms 后处理下一组...`));
+            // 如果还有下一批，添加延迟
+            if (i + maxWorkers < translationTasks.length) {
+                const delay = 2000;
+                console.log(chalk.gray(`等待 ${delay}ms 后处理下一批...`));
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }

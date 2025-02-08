@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "test:custom": "./scripts/run-test.sh",
+    "test:custom": "tsx examples/custom-test.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepare": "husky install",
@@ -51,6 +51,7 @@
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "cross-env": "^7.0.3",
     "eslint": "^8.0.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
@@ -60,6 +61,7 @@
     "rimraf": "^5.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.9.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.0.0"
   },
   "engines": {

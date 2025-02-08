@@ -1,13 +1,17 @@
 import { Translator } from '../src/index.js';
 import { FileProcessor } from '../src/utils/file-processor.js';
-import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import * as dotenv from 'dotenv';
 
 // 加载环境变量
 dotenv.config();
 
-// 使用 process.cwd() 获取当前工作目录
-const projectRoot = process.cwd();
+// 获取 __dirname (ESM 兼容)
+// @ts-ignore
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = join(__dirname, '..');
 
 async function testCustomTranslation() {
   // 1. 配置翻译器
@@ -22,8 +26,8 @@ async function testCustomTranslation() {
   });
 
   // 2. 设置输入输出路径
-  const inputFile = path.join(projectRoot, 'examples', 'zh-CN.json');
-  const outputDir = path.join(projectRoot, 'examples', 'translations');
+  const inputFile = join(projectRoot, 'examples', 'zh-CN.json');
+  const outputDir = join(projectRoot, 'examples', 'translations');
 
   // 3. 定义目标语言
   const targetLanguages = process.env.TARGET_LANGS ?
