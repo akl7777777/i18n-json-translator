@@ -22,6 +22,9 @@ program
     .option('-o, --output <dir>', 'Output directory', './translations')
     .option('--custom-api-url <url>', 'Custom API URL for custom provider')
     .option('--custom-api-key <key>', 'Custom API key for custom provider')
+    .option('--max-workers <number>', '最大并行工作线程数', '3')
+    .option('--batch-size <number>', '每批处理的键数量', '50')
+    .option('--batch-delay <number>', '批次间延迟(ms)', '2000')
     .action(async (file: string, options) => {
         try {
             // 构建翻译器配置
@@ -54,11 +57,12 @@ program
             console.log(`Target languages: ${languages.join(', ')}`);
 
             // 处理翻译
-            const results = await FileProcessor.processTranslations(
+            const results = await FileProcessor.processTranslationsParallel(
                 inputPath,
                 outputDir,
                 translator,
-                languages
+                languages,
+                Number(options.maxWorkers)
             );
 
             console.log('\nTranslation completed!');

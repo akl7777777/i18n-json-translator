@@ -37,11 +37,14 @@ async function testCustomTranslation() {
     console.log('Target languages:', targetLanguages.join(', '));
     console.log('Using model:', translator.getModel()); // 添加模型信息的输出
 
-    const results = await FileProcessor.processTranslations(
+    // 使用并行处理方法，设置最大并行数为3（可以通过环境变量配置）
+    const maxWorkers = Number(process.env.MAX_WORKERS) || 3;
+    const results = await FileProcessor.processTranslationsParallel(
       inputFile,
       outputDir,
       translator,
-      targetLanguages
+      targetLanguages,
+      maxWorkers
     );
 
     // 5. 打印结果
