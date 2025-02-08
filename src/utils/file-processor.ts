@@ -142,9 +142,9 @@ export class FileProcessor {
      * 将翻译结果保存到文件
      */
     static saveTranslation(
-      outputDir: string,
-      languageCode: string,
-      data: TranslationResult
+        outputDir: string,
+        languageCode: string,
+        data: TranslationResult
     ): string {
         try {
             if (!fs.existsSync(outputDir)) {
@@ -155,10 +155,27 @@ export class FileProcessor {
             const outputPath = path.join(outputDir, `${languageCode}.json`);
             console.log(chalk.blue('\nSaving translation to:', outputPath));
 
+            // 递归保持对象顺序
+            const maintainObjectOrder = (obj: any): any => {
+                if (typeof obj !== 'object' || obj === null) {
+                    return obj;
+                }
+
+                const orderedObj: any = {};
+                // 使用原始输入文件的键顺序
+                Object.keys(obj).forEach(key => {
+                    orderedObj[key] = typeof obj[key] === 'object' && obj[key] !== null
+                        ? maintainObjectOrder(obj[key])
+                        : obj[key];
+                });
+                return orderedObj;
+            };
+
+            const orderedData = maintainObjectOrder(data);
             fs.writeFileSync(
-              outputPath,
-              JSON.stringify(data, null, 2),
-              'utf8'
+                outputPath,
+                JSON.stringify(orderedData, null, 2),
+                'utf8'
             );
 
             console.log(chalk.green('File saved successfully'));
@@ -305,14 +322,34 @@ export class FileProcessor {
         lang: string,
         options: Required<TranslationOptions>
     ): Promise<TranslationResult> {
+        // 使用原始对象的结构创建结果对象
         const result: TranslationResult = {};
         let completedKeys = 0;
-        const entries = Object.entries(inputData);
         
-        // 创建一个队列来管理翻译任务
-        const queue = entries.map(([key, value]) => ({ key, value }));
+        // 先收集所有需要翻译的文本及其路径
+        const translationTasks: Array<{
+            path: string[];
+            value: string;
+        }> = [];
+        
+        const collectTasks = (obj: Record<string, unknown>, currentPath: string[] = []) => {
+            for (const [key, value] of Object.entries(obj)) {
+                const path = [...currentPath, key];
+                if (typeof value === 'string') {
+                    translationTasks.push({ path, value });
+                } else if (value && typeof value === 'object') {
+                    collectTasks(value as Record<string, unknown>, path);
+                }
+            }
+        };
+        
+        collectTasks(inputData);
+        
+        // 创建队列来管理翻译任务
+        const queue = [...translationTasks];
         const inProgress = new Set<Promise<any>>();
-        
+        const translations = new Map<string, string>();
+
         while (queue.length > 0 || inProgress.size > 0) {
             // 检查长时间未完成的请求
             const stuckRequests = Array.from(this.activeRequests).filter(id => {
@@ -325,47 +362,31 @@ export class FileProcessor {
                 stuckRequests.forEach(id => this.activeRequests.delete(id));
             }
 
-            // 显示队列状态（简化版）
-            if (queue.length > 0 || inProgress.size > 0) {
-                this.log(`[${lang}] 剩余任务: ${queue.length}个, 进行中: ${inProgress.size}个`, 'info');
-            }
-
-            // 填充进行中的任务，直到达到最大并发数
+            // 填充进行中的任务
             while (queue.length > 0 && inProgress.size < options.maxWorkers) {
-                const { key, value } = queue.shift()!;
+                const task = queue.shift()!;
                 
                 const promise = (async () => {
                     try {
-                        let translatedValue: string | TranslationResult;
+                        const cached = this.getCachedTranslation(task.value, lang);
+                        let translation: string;
                         
-                        if (typeof value === 'string') {
-                            // 检查缓存
-                            const cached = this.getCachedTranslation(value, lang);
-                            if (cached) {
-                                this.log(`[${lang}] 使用缓存: "${value}" => "${cached}"`, 'info');
-                                translatedValue = cached;
-                            } else {
-                                translatedValue = await this.translateText(translator, value, lang, options);
-                                this.log(`[${lang}] 新翻译: "${value}" => "${translatedValue}"`, 'success');
-                                this.cacheTranslation(value, lang, translatedValue);
-                            }
-                            completedKeys++;
-                            this.updateProgress(lang, completedKeys);
-                        } else if (value && typeof value === 'object') {
-                            translatedValue = await this.translateLanguage(
-                                translator,
-                                value as Record<string, unknown>,
-                                lang,
-                                options
-                            );
+                        if (cached) {
+                            this.log(`[${lang}] 使用缓存: "${task.value}" => "${cached}"`, 'info');
+                            translation = cached;
                         } else {
-                            translatedValue = String(value);
+                            translation = await this.translateText(translator, task.value, lang, options);
+                            this.log(`[${lang}] 新翻译: "${task.value}" => "${translation}"`, 'success');
+                            this.cacheTranslation(task.value, lang, translation);
                         }
                         
-                        result[key] = translatedValue;
+                        translations.set(task.path.join('.'), translation);
+                        completedKeys++;
+                        this.updateProgress(lang, completedKeys);
+                        
                     } catch (error) {
-                        this.log(`[${lang}] 键 "${key}" 翻译失败: ${error}`, 'error');
-                        result[key] = `[TRANSLATION_FAILED] ${value}`;
+                        this.log(`[${lang}] 翻译失败: ${error}`, 'error');
+                        translations.set(task.path.join('.'), `[TRANSLATION_FAILED] ${task.value}`);
                     }
                 })();
                 
@@ -375,20 +396,30 @@ export class FileProcessor {
                 });
             }
             
-            // 等待任意一个任务完成
             if (inProgress.size > 0) {
                 await Promise.race(Array.from(inProgress));
             }
         }
 
-        // 检查是否有未完成的请求
-        if (this.activeRequests.size > 0) {
-            this.log(`[${lang}] 有 ${this.activeRequests.size} 个请求未完成，已强制结束`, 'warning');
-            this.activeRequests.clear();
-        }
+        // 根据原始结构重建翻译后的对象
+        const rebuildObject = (obj: Record<string, unknown>, currentPath: string[] = []): TranslationResult => {
+            const result: TranslationResult = {};
+            
+            for (const [key, value] of Object.entries(obj)) {
+                const path = [...currentPath, key];
+                if (typeof value === 'string') {
+                    result[key] = translations.get(path.join('.')) || `[MISSING] ${value}`;
+                } else if (value && typeof value === 'object') {
+                    result[key] = rebuildObject(value as Record<string, unknown>, path);
+                } else {
+                    result[key] = String(value);  // 确保非对象值转换为字符串
+                }
+            }
+            
+            return result;
+        };
 
-        this.log(`[${lang}] 所有键翻译完成，共 ${completedKeys} 个`, 'success');
-        return result;
+        return rebuildObject(inputData);
     }
 
     static async processTranslationsParallel(
