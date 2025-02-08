@@ -1,0 +1,22 @@
+{
+  "welcome": {
+    "title": "欢迎使用我们的服务",
+    "subtitle": "让我们开始吧",
+    "description": "这是一个测试文件，用于验证翻译功能是否正常工作。"
+  },
+  "features": {
+    "feature1": {
+      "name": "自动翻译",
+      "description": "支持多种语言的自动翻译功能"
+    },
+    "feature2": {
+      "name": "格式保持",
+      "description": "保持原有的 JSON 结构不变"
+    }
+  },
+  "settings": {
+    "language": "语言设置",
+    "theme": "主题设置",
+    "notifications": "通知设置"
+  }
+}
