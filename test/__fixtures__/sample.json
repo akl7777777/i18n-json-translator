@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "我的应用",
+    "description": "这是一个示例应用",
+    "version": "1.0.0"
+  },
+  "navigation": {
+    "home": "首页",
+    "about": "关于我们",
+    "contact": "联系方式"
+  },
+  "settings": {
+    "theme": {
+      "light": "明亮模式",
+      "dark": "深色模式",
+      "auto": "自动切换"
+    },
+    "language": {
+      "name": "语言设置",
+      "current": "当前语言：简体中文"
+    }
+  },
+  "messages": {
+    "welcome": "欢迎使用我们的应用！",
+    "goodbye": "感谢使用，再见！",
+    "error": {
+      "generic": "出现错误，请稍后重试",
+      "network": "网络连接失败"
+    }
+  }
+}
