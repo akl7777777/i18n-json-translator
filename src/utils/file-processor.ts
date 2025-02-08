@@ -300,6 +300,9 @@ export class FileProcessor {
         const finalOptions = { ...this.DEFAULT_OPTIONS, ...options };
         const inputData = this.readJsonFile(inputFile);
         
+        // 初始化日志
+        this.initializeLogger(outputDir);
+        
         // 初始化进度和缓存
         this.initializeProgress(inputData, targetLanguages);
         
