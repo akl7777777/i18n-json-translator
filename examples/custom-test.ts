@@ -22,7 +22,7 @@ async function testCustomTranslation() {
   });
 
   // 2. 设置输入输出路径
-  const inputFile = path.join(projectRoot, 'examples', 'test-input.json');
+  const inputFile = path.join(projectRoot, 'examples', 'zh-CN.json');
   const outputDir = path.join(projectRoot, 'examples', 'translations');
 
   // 3. 定义目标语言
