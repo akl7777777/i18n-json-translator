@@ -116,7 +116,15 @@ export class FileProcessor {
      * 标准化语言代码
      */
     private static normalizeLanguageCode(code: string): string {
-      return this.LANGUAGE_CODE_ALIASES[code.toLowerCase()] || code;
+        const languageMap: Record<string, string> = {
+            'jp': 'ja',    // 日语
+            'kr': 'ko',    // 韩语
+            'cn': 'zh',    // 中文
+            // 可以添加更多映射
+        };
+
+        // 仅在需要时转换语言代码，用于API调用
+        return languageMap[code.toLowerCase()] || code.toLowerCase();
     }
 
     /**
@@ -143,7 +151,7 @@ export class FileProcessor {
      */
     static saveTranslation(
         outputDir: string,
-        languageCode: string,
+        languageCode: string,  // 使用原始语言代码
         data: TranslationResult
     ): string {
         try {
@@ -152,6 +160,7 @@ export class FileProcessor {
                 fs.mkdirSync(outputDir, { recursive: true });
             }
 
+            // 直接使用原始语言代码，不做标准化处理
             const outputPath = path.join(outputDir, `${languageCode}.json`);
             console.log(chalk.blue('\nSaving translation to:', outputPath));
 
@@ -437,35 +446,36 @@ export class FileProcessor {
         this.initializeProgress(inputData, targetLanguages);
 
         const results: Record<string, string> = {};
-        const normalizedLanguages = targetLanguages.map(lang => this.normalizeLanguageCode(lang));
-
-        // 一次处理一种语言
-        for (const lang of normalizedLanguages) {
+        
+        // 保存原始语言代码，但在翻译时使用标准化的代码
+        for (const originalLang of targetLanguages) {
             try {
-                this.log(`\n开始处理语言: ${lang}`, 'info');
+                const normalizedLang = this.normalizeLanguageCode(originalLang);
+                this.log(`\n开始处理语言: ${originalLang}`, 'info');
                 const translatedData = await this.translateLanguage(
                     translator,
                     inputData,
-                    lang,
+                    normalizedLang,  // 使用标准化的语言代码进行翻译
                     finalOptions
                 );
 
-                const outputPath = this.saveTranslation(outputDir, lang, translatedData);
-                this.log(`✓ [${lang}] 翻译完成并保存到: ${outputPath}`, 'success');
-                results[lang] = outputPath;
-                this.processedLanguages.add(lang);
+                // 使用原始语言代码保存文件
+                const outputPath = this.saveTranslation(outputDir, originalLang, translatedData);
+                this.log(`✓ [${originalLang}] 翻译完成并保存到: ${outputPath}`, 'success');
+                results[originalLang] = outputPath;
+                this.processedLanguages.add(originalLang);
 
                 // 输出当前进度统计
                 const completedCount = this.processedLanguages.size;
-                const totalCount = normalizedLanguages.length;
+                const totalCount = targetLanguages.length;
                 const percentage = ((completedCount / totalCount) * 100).toFixed(1);
                 this.log(`\n总体进度: ${completedCount}/${totalCount} 种语言 (${percentage}%)`, 'info');
                 this.log(`缓存命中统计: ${Object.keys(this.translationCache).length} 个语言`, 'info');
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                this.log(`✗ [${lang}] 翻译失败: ${errorMessage}`, 'error');
-                results[lang] = `ERROR: ${errorMessage}`;
+                this.log(`✗ [${originalLang}] 翻译失败: ${errorMessage}`, 'error');
+                results[originalLang] = `ERROR: ${errorMessage}`;
             }
         }
 
