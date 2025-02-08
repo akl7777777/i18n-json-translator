@@ -1,6 +1,6 @@
 # i18n-json-translator
 
-A powerful tool for translating JSON files with nested Chinese values into multiple languages using AI (OpenAI GPT or Anthropic Claude).
+A powerful tool for translating JSON files with nested Chinese values into multiple languages using AI (OpenAI GPT, Anthropic Claude, or Custom API provider).
 
 [![npm version](https://badge.fury.io/js/i18n-json-translator.svg)](https://badge.fury.io/js/i18n-json-translator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -11,8 +11,10 @@ A powerful tool for translating JSON files with nested Chinese values into multi
 - 🔄 Preserves JSON structure and keys
 - 📝 Handles nested JSON objects
 - 🤖 Uses AI for high-quality translations
-- ⚙️ Configurable translation provider (OpenAI/Claude)
+- ⚙️ Flexible provider options (OpenAI/Claude/Custom API)
 - 🛡️ Written in TypeScript with full type support
+- 📁 File-based processing with batch translation support
+- 🔌 Support for custom API endpoints with OpenAI-compatible format
 
 ## Installation
 
@@ -22,15 +24,21 @@ npm install i18n-json-translator
 
 ## Quick Start
 
+### Using OpenAI or Claude
+
 ```typescript
 import { Translator } from 'i18n-json-translator';
 
-// Initialize the translator
+// Initialize with OpenAI
 const translator = new Translator({
-  openaiApiKey: 'your-openai-api-key',
-  // or use Claude
-  // anthropicApiKey: 'your-anthropic-api-key',
-  // provider: 'claude'
+  provider: 'openai',
+  openaiApiKey: 'your-openai-api-key'
+});
+
+// Or use Claude
+const translator = new Translator({
+  provider: 'claude',
+  anthropicApiKey: 'your-anthropic-api-key'
 });
 
 // Sample JSON with Chinese text
@@ -47,6 +55,40 @@ const result = await translator.translateObject(input, 'en');
 console.log(result);
 ```
 
+### Using Custom API Provider
+
+```typescript
+import { Translator } from 'i18n-json-translator';
+
+// Initialize with custom API (OpenAI-compatible format)
+const translator = new Translator({
+  provider: 'custom',
+  customProvider: {
+    apiUrl: 'https://your-api-endpoint/v1/chat/completions',
+    apiKey: 'your-api-key',
+    format: 'openai'
+  },
+  model: 'gpt-3.5-turbo' // Optional model specification
+});
+
+// Process translation
+const result = await translator.translateObject(input, 'en');
+```
+
+### File-based Processing
+
+```typescript
+import { FileProcessor } from 'i18n-json-translator/utils';
+
+// Process an entire JSON file
+const results = await FileProcessor.processTranslations(
+  'input.json',
+  'output-directory',
+  translator,
+  ['en', 'ja', 'ko']
+);
+```
+
 ## Supported Languages
 
 | Code | Language    | Native Name    |
@@ -59,23 +101,30 @@ console.log(result);
 | pt   | Portuguese  | Português      |
 | ru   | Russian     | Русский        |
 | ja   | Japanese    | 日本語         |
-| ko   | Korean      | 한국어         |
+| ko   | Korean      | 한国어         |
 | vi   | Vietnamese  | Tiếng Việt     |
 
 ## Configuration Options
 
 ```typescript
 interface TranslationConfig {
-  // OpenAI API key (required if using OpenAI)
+  // OpenAI configuration
   openaiApiKey?: string;
   
-  // Anthropic API key (required if using Claude)
+  // Anthropic configuration
   anthropicApiKey?: string;
   
-  // Translation provider ('openai' or 'claude')
-  provider?: 'openai' | 'claude';
+  // Custom API configuration
+  customProvider?: {
+    apiUrl: string;
+    apiKey: string;
+    format: 'openai';  // Currently supports OpenAI format
+  };
   
-  // Model to use (default: 'gpt-4' for OpenAI, 'claude-3-sonnet' for Claude)
+  // Provider selection
+  provider?: 'openai' | 'claude' | 'custom';
+  
+  // Model specification
   model?: string;
   
   // Source language (default: 'zh')
@@ -89,8 +138,20 @@ interface TranslationConfig {
 # Install globally
 npm install -g i18n-json-translator
 
-# Translate a file
-i18n-json-translator translate input.json --target en,ja,ko
+# Using OpenAI
+i18n-json-translator translate input.json --target en,ja,ko --provider openai
+
+# Using Custom API
+i18n-json-translator translate input.json \
+  --target en,ja,ko \
+  --provider custom \
+  --custom-api-url https://your-api-endpoint/v1/chat/completions \
+  --custom-api-key your-api-key
+
+# Using environment variables
+export CUSTOM_API_URL=https://your-api-endpoint/v1/chat/completions
+export CUSTOM_API_KEY=your-api-key
+i18n-json-translator translate input.json -t en,ja,ko -p custom
 
 # Show help
 i18n-json-translator --help
@@ -98,7 +159,7 @@ i18n-json-translator --help
 
 ## Error Handling
 
-The translator throws typed errors that you can handle in your application:
+The translator provides typed errors for better error handling:
 
 ```typescript
 try {
@@ -106,6 +167,7 @@ try {
 } catch (error) {
   if (error.code === 'TRANSLATION_FAILED') {
     console.error('Translation failed:', error.message);
+    console.error('Details:', error.details);
   }
 }
 ```
@@ -119,11 +181,30 @@ npm install
 # Run tests
 npm test
 
+# Test custom API integration
+npm run test:custom
+
 # Build
 npm run build
 
-# Lint
+# Lint and format
 npm run lint
+npm run format
+```
+
+## Environment Variables
+
+You can use environment variables for configuration:
+
+```bash
+# Create .env file
+cp .env.example .env
+
+# Configure your API keys
+OPENAI_API_KEY=your-openai-key
+ANTHROPIC_API_KEY=your-anthropic-key
+CUSTOM_API_URL=your-api-url
+CUSTOM_API_KEY=your-api-key
 ```
 
 ## Contributing

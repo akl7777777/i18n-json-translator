@@ -38,8 +38,8 @@ export class Translator {
     }
 
     public async translateObject(
-        obj: Record<string, unknown>,
-        targetLang: string
+      obj: Record<string, unknown>,
+      targetLang: string
     ): Promise<TranslationResult> {
         validateLanguageCode(targetLang);
         const result: TranslationResult = {};
@@ -47,8 +47,8 @@ export class Translator {
         for (const [key, value] of Object.entries(obj)) {
             if (value && typeof value === 'object') {
                 result[key] = await this.translateObject(
-                    value as Record<string, unknown>,
-                    targetLang
+                  value as Record<string, unknown>,
+                  targetLang
                 );
             } else if (typeof value === 'string' && isChineseText(value)) {
                 try {
@@ -65,15 +65,24 @@ export class Translator {
     }
 
     private async translateText(text: string, targetLang: string): Promise<string> {
-        if (this.provider === 'openai') {
-            return this.translateWithOpenAI(text, targetLang);
+        switch (this.provider) {
+            case 'openai':
+                return this.translateWithOpenAI(text, targetLang);
+            case 'claude':
+                return this.translateWithClaude(text, targetLang);
+            case 'custom':
+                if (!this.customClient) {
+                    throw new Error('Custom client not initialized');
+                }
+                return this.customClient.translate(text, this.sourceLanguage, targetLang, this.model);
+            default:
+                throw new Error(`Unsupported provider: ${this.provider}`);
         }
-        return this.translateWithClaude(text, targetLang);
     }
 
     private async translateWithOpenAI(
-        text: string,
-        targetLang: string
+      text: string,
+      targetLang: string
     ): Promise<string> {
         if (!this.openaiClient) {
             throw new Error('OpenAI client not initialized');
@@ -85,7 +94,7 @@ export class Translator {
                 messages: [
                     {
                         role: 'system',
-                        content: `You are a professional translator. Translate the following text from ${this.sourceLanguage} to ${targetLang}. Maintain all formatting and special characters. Only return the translated text without any explanations.`
+                        content: `You are a professional translator. Translate the given Chinese text to ${targetLang}. Keep any special characters and formatting. Only return the translated text without any explanations.`
                     },
                     {
                         role: 'user',
@@ -101,8 +110,8 @@ export class Translator {
     }
 
     private async translateWithClaude(
-        text: string,
-        targetLang: string
+      text: string,
+      targetLang: string
     ): Promise<string> {
         if (!this.anthropicClient) {
             throw new Error('Claude client not initialized');
