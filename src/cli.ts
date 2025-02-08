@@ -4,7 +4,7 @@ import { program } from 'commander';
 import { resolve } from 'path';
 import { Translator } from './translator';
 import { FileProcessor } from './utils/file-processor';
-import { TranslationConfig } from './types/config';
+import { TranslationConfig, TranslationOptions } from './types/config';
 
 const version = '1.0.0';
 
@@ -25,6 +25,9 @@ program
     .option('--max-workers <number>', '最大并行工作线程数', '3')
     .option('--batch-size <number>', '每批处理的键数量', '50')
     .option('--batch-delay <number>', '批次间延迟(ms)', '2000')
+    .option('--max-retries <number>', '最大重试次数', '3')
+    .option('--retry-delay <number>', '重试延迟(ms)', '2000')
+    .option('--retry-multiplier <number>', '重试延迟倍数', '1.5')
     .action(async (file: string, options) => {
         try {
             // 构建翻译器配置
@@ -51,6 +54,15 @@ program
             const outputDir = resolve(options.output);
             const languages = options.target.split(',');
 
+            // 构建翻译选项
+            const translationOptions: TranslationOptions = {
+                maxWorkers: Number(options.maxWorkers),
+                maxRetries: Number(options.maxRetries),
+                retryDelay: Number(options.retryDelay),
+                retryMultiplier: Number(options.retryMultiplier),
+                batchDelay: Number(options.batchDelay)
+            };
+
             console.log('Starting translation...');
             console.log(`Input file: ${inputPath}`);
             console.log(`Output directory: ${outputDir}`);
@@ -62,7 +74,7 @@ program
                 outputDir,
                 translator,
                 languages,
-                Number(options.maxWorkers)
+                translationOptions
             );
 
             console.log('\nTranslation completed!');

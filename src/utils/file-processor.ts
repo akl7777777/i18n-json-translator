@@ -254,23 +254,40 @@ export class FileProcessor {
         inputData: Record<string, unknown>,
         lang: string,
         options: Required<TranslationOptions>
-    ): Promise<Record<string, unknown>> {
-        const result: Record<string, unknown> = {};
+    ): Promise<TranslationResult> {
+        const result: TranslationResult = {};
         let completedKeys = 0;
-
-        for (const [key, value] of Object.entries(inputData)) {
+        const entries = Object.entries(inputData);
+        
+        for (let i = 0; i < entries.length; i++) {
+            const [key, value] = entries[i];
+            
             if (typeof value === 'string') {
                 result[key] = await this.translateText(translator, value, lang, options);
                 completedKeys++;
                 this.updateProgress(lang, completedKeys);
+                
+                if (i < entries.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
             } else if (value && typeof value === 'object') {
-                result[key] = await this.translateLanguage(translator, value as Record<string, unknown>, lang, options);
+                // 递归处理嵌套对象，确保类型正确
+                result[key] = await this.translateLanguage(
+                    translator,
+                    value as Record<string, unknown>,
+                    lang,
+                    options
+                );
+            } else if (value === null || value === undefined) {
+                // 处理空值
+                result[key] = '';
             } else {
-                result[key] = value;
+                // 其他类型转换为字符串
+                result[key] = String(value);
             }
         }
 
-        return result;
+        return result as TranslationResult; // 确保返回类型正确
     }
 
     static async processTranslationsParallel(
@@ -288,52 +305,41 @@ export class FileProcessor {
         
         // 一次处理一个完整的语言文件
         const results: Record<string, string> = {};
-        for (let i = 0; i < targetLanguages.length; i += finalOptions.maxWorkers) {
-            const batch = targetLanguages.slice(i, i + finalOptions.maxWorkers);
-            
-            this.log(`开始处理语言批次 ${Math.floor(i / finalOptions.maxWorkers) + 1}/${Math.ceil(targetLanguages.length / finalOptions.maxWorkers)}`, 'info');
-            
-            const batchPromises = batch.map(async lang => {
-                try {
-                    const normalizedLang = this.normalizeLanguageCode(lang);
-                    this.log(`开始翻译 ${normalizedLang}...`, 'info');
-                    
-                    const translatedData = await this.translateLanguage(
-                        translator,
-                        inputData,
-                        normalizedLang,
-                        finalOptions
-                    );
+        const normalizedLanguages = targetLanguages.map(lang => this.normalizeLanguageCode(lang));
+        
+        // 创建所有语言的翻译任务
+        const translationPromises = normalizedLanguages.map(async lang => {
+            try {
+                this.log(`开始翻译 ${lang}...`, 'info');
+                
+                const translatedData = await this.translateLanguage(
+                    translator,
+                    inputData,
+                    lang,
+                    finalOptions
+                );
 
-                    const outputPath = this.saveTranslation(outputDir, normalizedLang, translatedData);
-                    this.log(`✓ ${normalizedLang} 翻译完成并保存`, 'success');
-                    
-                    return [normalizedLang, outputPath];
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    this.log(`✗ ${lang} 翻译失败: ${errorMessage}`, 'error');
-                    return [lang, `ERROR: ${errorMessage}`];
-                }
-            });
-
-            const batchResults = await Promise.all(batchPromises);
-            batchResults.forEach(([lang, path]) => {
-                if (!path.startsWith('ERROR:')) {
-                    results[lang] = path;
-                }
-            });
-
-            // 批次间延迟
-            if (i + finalOptions.maxWorkers < targetLanguages.length) {
-                this.log(`等待 ${finalOptions.batchDelay}ms 后处理下一批...`, 'info');
-                await new Promise(resolve => setTimeout(resolve, finalOptions.batchDelay));
+                // 这里 translatedData 现在是 TranslationResult 类型
+                const outputPath = this.saveTranslation(outputDir, lang, translatedData);
+                this.log(`✓ ${lang} 翻译完成并保存`, 'success');
+                
+                return [lang, outputPath];
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                this.log(`✗ ${lang} 翻译失败: ${errorMessage}`, 'error');
+                return [lang, `ERROR: ${errorMessage}`];
             }
-        }
+        });
 
-        // 输出缓存统计
-        const totalCached = Object.values(this.translationCache)
-            .reduce((sum, langCache) => sum + Object.keys(langCache).length, 0);
-        this.log(`翻译缓存统计: ${totalCached} 条记录`, 'info');
+        // 使用 Promise.all 并行处理所有语言
+        const allResults = await Promise.all(translationPromises);
+        
+        // 处理结果
+        allResults.forEach(([lang, path]) => {
+            if (!path.startsWith('ERROR:')) {
+                results[lang] = path;
+            }
+        });
 
         return results;
     }

@@ -3,22 +3,36 @@ export type Provider = 'openai' | 'claude' | 'custom';
 export interface CustomProviderConfig {
     apiUrl: string;
     apiKey: string;
-    format: 'openai'; // 将来可以支持更多格式
+    format: 'openai' | 'claude'; // 将来可以支持更多格式
 }
 
 export interface TranslationConfig {
+    provider: 'openai' | 'claude' | 'custom';
+    model?: string;
     openaiApiKey?: string;
     anthropicApiKey?: string;
-    provider?: Provider;
-    model?: string;
-    sourceLanguage?: string;
-    customProvider?: CustomProviderConfig;
+    customProvider?: {
+        apiUrl: string;
+        apiKey: string;
+        format: 'openai' | 'claude';
+    };
 }
 
 export interface SupportedLanguage {
     code: string;
     name: string;
     nativeName: string;
+}
+
+export interface RetryOptions {
+    maxRetries?: number;    // 最大重试次数
+    retryDelay?: number;    // 初始重试延迟(ms)
+    retryMultiplier?: number; // 重试延迟倍数
+}
+
+export interface TranslationOptions extends RetryOptions {
+    maxWorkers?: number;    // 最大并行工作线程数
+    batchDelay?: number;    // 批次间延迟(ms)
 }
 
 export type TranslationResult = {
