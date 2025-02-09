@@ -9,6 +9,7 @@ import {
     ITranslator
 } from './types/config';
 import { isChineseText, validateConfig, validateLanguageCode } from './utils';
+import { getTranslationPrompt } from './prompts';
 
 export class Translator implements ITranslator {
     private readonly openaiClient?: OpenAI;
@@ -89,24 +90,25 @@ export class Translator implements ITranslator {
     }
 
     private async translateWithOpenAI(
-      text: string,
-      targetLang: string
+        text: string,
+        targetLang: string
     ): Promise<string> {
         if (!this.openaiClient) {
             throw new Error('OpenAI client not initialized');
         }
 
         try {
+            const prompt = getTranslationPrompt(targetLang, this.sourceLanguage);
             const response = await this.openaiClient.chat.completions.create({
                 model: this.model,
                 messages: [
                     {
                         role: 'system',
-                        content: `You are a professional translator. Translate the given Chinese text to ${targetLang}. Keep any special characters and formatting. Only return the translated text without any explanations.`
+                        content: prompt.system
                     },
                     {
                         role: 'user',
-                        content: text
+                        content: prompt.user(text)
                     }
                 ]
             });
@@ -118,21 +120,22 @@ export class Translator implements ITranslator {
     }
 
     private async translateWithClaude(
-      text: string,
-      targetLang: string
+        text: string,
+        targetLang: string
     ): Promise<string> {
         if (!this.anthropicClient) {
             throw new Error('Claude client not initialized');
         }
 
         try {
+            const prompt = getTranslationPrompt(targetLang, this.sourceLanguage);
             const response = await this.anthropicClient.messages.create({
                 model: this.model,
                 max_tokens: 1024,
-                system: "You are a professional translator. Only return the translated text without any explanations.",
+                system: prompt.system,
                 messages: [{
                     role: 'user',
-                    content: `Translate the following text from ${this.sourceLanguage} to ${targetLang}: ${text}`
+                    content: prompt.user(text)
                 }]
             });
 

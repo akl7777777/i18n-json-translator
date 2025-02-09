@@ -1,0 +1,1 @@
+export { getTranslationPrompt } from './translation'
