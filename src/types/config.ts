@@ -7,15 +7,12 @@ export interface CustomProviderConfig {
 }
 
 export interface TranslationConfig {
-    provider: 'openai' | 'claude' | 'custom';
+    provider?: Provider;
     model?: string;
     openaiApiKey?: string;
     anthropicApiKey?: string;
-    customProvider?: {
-        apiUrl: string;
-        apiKey: string;
-        format: 'openai' | 'claude';
-    };
+    customProvider?: CustomProviderConfig;
+    sourceLanguage?: string;  // 添加源语言配置
 }
 
 export interface SupportedLanguage {
