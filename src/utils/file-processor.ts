@@ -352,7 +352,8 @@ export class FileProcessor {
         translator: any,
         inputData: Record<string, unknown>,
         lang: string,
-        options: Required<TranslationOptions>
+        options: Required<TranslationOptions>,
+        onError: (key: string, path: string[], value: string, error: string) => void
     ): Promise<TranslationResult> {
         // 使用原始对象的结构创建结果对象
         const result: TranslationResult = {};
@@ -419,6 +420,7 @@ export class FileProcessor {
                     } catch (error) {
                         this.log(`[${lang}] 翻译失败: ${error}`, 'error');
                         translations.set(task.path.join('.'), `[TRANSLATION_FAILED] ${task.value}`);
+                        onError(task.value, task.path, task.value, error instanceof Error ? error.message : String(error));
                     }
                 })();
                 
@@ -454,6 +456,49 @@ export class FileProcessor {
         return rebuildObject(inputData);
     }
 
+    /**
+     * 最后尝试重新翻译失败的内容
+     */
+    private static async retryFailedTranslations(
+        translator: any,
+        failedItems: Array<{
+            key: string;
+            path: string[];
+            value: string;
+            error: string;
+        }>,
+        lang: string,
+        options: Required<TranslationOptions>
+    ): Promise<Map<string, string>> {
+        const retryResults = new Map<string, string>();
+        
+        this.log(`[${lang}] 开始重试 ${failedItems.length} 个失败的翻译...`, 'info');
+        
+        for (const item of failedItems) {
+            try {
+                // 增加重试延迟，避免请求过于密集
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const translation = await this.translateText(
+                    translator,
+                    item.value,
+                    lang,
+                    options
+                );
+                
+                if (translation && !translation.startsWith('[TRANSLATION_FAILED]')) {
+                    retryResults.set(item.path.join('.'), translation);
+                    this.log(`[${lang}] 重试成功: "${item.value}" => "${translation}"`, 'success');
+                }
+            } catch (error) {
+                this.log(`[${lang}] 重试失败: ${item.value}`, 'error');
+                // 继续处理下一个，不中断重试流程
+            }
+        }
+        
+        return retryResults;
+    }
+
     static async processTranslationsParallel(
         inputFile: string,
         outputDir: string,
@@ -463,38 +508,87 @@ export class FileProcessor {
     ): Promise<Record<string, string>> {
         const finalOptions = { ...this.DEFAULT_OPTIONS, ...options };
         const inputData = this.readJsonFile(inputFile);
+        const results: Record<string, string> = {};
+        const failedTranslations: Record<string, Array<{
+            key: string;
+            path: string[];
+            value: string;
+            error: string;
+        }>> = {};
 
         // 初始化日志和进度
         this.initializeLogger(outputDir);
         this.initializeProgress(inputData, targetLanguages);
 
-        const results: Record<string, string> = {};
-        
-        // 保存原始语言代码，但在翻译时使用标准化的代码
         for (const originalLang of targetLanguages) {
             try {
                 const normalizedLang = this.normalizeLanguageCode(originalLang);
                 this.log(`\n开始处理语言: ${originalLang}`, 'info');
+                
+                failedTranslations[originalLang] = [];
+                
                 const translatedData = await this.translateLanguage(
                     translator,
                     inputData,
-                    normalizedLang,  // 使用标准化的语言代码进行翻译
-                    finalOptions
+                    normalizedLang,
+                    finalOptions,
+                    (key: string, path: string[], value: string, error: string) => {
+                        failedTranslations[originalLang].push({ key, path, value, error });
+                    }
                 );
 
-                // 使用原始语言代码保存文件
-                const outputPath = this.saveTranslation(outputDir, originalLang, translatedData);
-                this.log(`✓ [${originalLang}] 翻译完成并保存到: ${outputPath}`, 'success');
-                results[originalLang] = outputPath;
+                // 在保存前重试失败的翻译
+                if (failedTranslations[originalLang].length > 0) {
+                    const retryResults = await this.retryFailedTranslations(
+                        translator,
+                        failedTranslations[originalLang],
+                        normalizedLang,
+                        finalOptions
+                    );
+
+                    // 将重试成功的结果合并到翻译数据中
+                    if (retryResults.size > 0) {
+                        const mergeRetryResults = (obj: any, path: string[] = []): any => {
+                            if (typeof obj !== 'object' || obj === null) {
+                                return obj;
+                            }
+
+                            const result: any = Array.isArray(obj) ? [] : {};
+                            for (const [key, value] of Object.entries(obj)) {
+                                const currentPath = [...path, key];
+                                const pathString = currentPath.join('.');
+                                
+                                if (retryResults.has(pathString)) {
+                                    result[key] = retryResults.get(pathString);
+                                } else if (typeof value === 'object') {
+                                    result[key] = mergeRetryResults(value, currentPath);
+                                } else {
+                                    result[key] = value;
+                                }
+                            }
+                            return result;
+                        };
+
+                        const mergedData = mergeRetryResults(translatedData);
+                        const outputPath = this.saveTranslation(outputDir, originalLang, mergedData);
+                        results[originalLang] = outputPath;
+                    } else {
+                        const outputPath = this.saveTranslation(outputDir, originalLang, translatedData);
+                        results[originalLang] = outputPath;
+                    }
+                } else {
+                    const outputPath = this.saveTranslation(outputDir, originalLang, translatedData);
+                    results[originalLang] = outputPath;
+                }
+
+                // 更新错误日志
+                if (failedTranslations[originalLang].length > 0) {
+                    this.saveErrorLog(originalLang, failedTranslations[originalLang], outputDir);
+                }
+
                 this.processedLanguages.add(originalLang);
-
-                // 输出当前进度统计
-                const completedCount = this.processedLanguages.size;
-                const totalCount = targetLanguages.length;
-                const percentage = ((completedCount / totalCount) * 100).toFixed(1);
-                this.log(`\n总体进度: ${completedCount}/${totalCount} 种语言 (${percentage}%)`, 'info');
-                this.log(`缓存命中统计: ${Object.keys(this.translationCache).length} 个语言`, 'info');
-
+                this.log(`✓ [${originalLang}] 翻译完成并保存到: ${results[originalLang]}`, 'success');
+                
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 this.log(`✗ [${originalLang}] 翻译失败: ${errorMessage}`, 'error');
@@ -505,8 +599,15 @@ export class FileProcessor {
         // 输出最终统计
         this.log('\n翻译任务完成！', 'success');
         this.log(`成功翻译语言: ${Object.keys(results).filter(lang => !results[lang].startsWith('ERROR:')).join(', ')}`, 'success');
-        this.log(`失败语言: ${Object.keys(results).filter(lang => results[lang].startsWith('ERROR:')).join(', ') || '无'}`, 'warning');
-        this.log(`缓存命中统计: ${Object.keys(this.translationCache).length} 个语言`, 'info');
+        
+        const failedLangs = Object.entries(failedTranslations)
+            .filter(([_, items]) => items.length > 0)
+            .map(([lang, items]) => `${lang}(${items.length}项)`);
+            
+        if (failedLangs.length > 0) {
+            this.log(`部分翻译失败的语言: ${failedLangs.join(', ')}`, 'warning');
+            this.log(`详细错误信息已保存到: ${path.join(outputDir, 'translation_errors.json')}`, 'info');
+        }
 
         return results;
     }
@@ -549,21 +650,35 @@ export class FileProcessor {
     /**
      * 保存错误日志
      */
-    private static saveErrorLog(lang: string, failedKeys: string[]): void {
-        const errorLogPath = path.join(process.cwd(), 'translation_errors.json');
-        let errorLog: Record<string, any> = {};
+    private static saveErrorLog(
+        lang: string, 
+        failedKeys: Array<{
+            key: string;
+            path: string[];
+            value: string;
+            error: string;
+        }>,
+        outputDir: string  // 添加输出目录参数
+    ): void {
+        try {
+            const errorLogPath = path.join(outputDir, 'translation_errors.json');
+            let errorLog: Record<string, any> = {};
 
-        if (fs.existsSync(errorLogPath)) {
-            errorLog = JSON.parse(fs.readFileSync(errorLogPath, 'utf8'));
+            if (fs.existsSync(errorLogPath)) {
+                errorLog = JSON.parse(fs.readFileSync(errorLogPath, 'utf8'));
+            }
+
+            errorLog[lang] = {
+                timestamp: new Date().toISOString(),
+                failedCount: failedKeys.length,
+                details: failedKeys,
+                status: 'partial_translation'
+            };
+
+            fs.writeFileSync(errorLogPath, JSON.stringify(errorLog, null, 2));
+            this.log(`[${lang}] ${failedKeys.length} 个翻译失败项已记录到错误日志`, 'warning');
+        } catch (error) {
+            this.log(`保存错误日志失败: ${error}`, 'error');
         }
-
-        errorLog[lang] = {
-            timestamp: new Date().toISOString(),
-            failedKeys: failedKeys,
-            status: 'partial_translation'
-        };
-
-        fs.writeFileSync(errorLogPath, JSON.stringify(errorLog, null, 2));
-        console.log(chalk.yellow(`[${lang}] ${failedKeys.length} 个key翻译失败，详情已记录到错误日志`));
     }
 }
