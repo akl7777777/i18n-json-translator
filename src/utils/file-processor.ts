@@ -472,30 +472,45 @@ export class FileProcessor {
     ): Promise<Map<string, string>> {
         const retryResults = new Map<string, string>();
         
-        this.log(`[${lang}] 开始重试 ${failedItems.length} 个失败的翻译...`, 'info');
+        this.log(`[${lang}] 开始并行重试 ${failedItems.length} 个失败的翻译...`, 'info');
         
-        for (const item of failedItems) {
-            try {
-                // 增加重试延迟，避免请求过于密集
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                const translation = await this.translateText(
-                    translator,
-                    item.value,
-                    lang,
-                    options
-                );
-                
-                if (translation && !translation.startsWith('[TRANSLATION_FAILED]')) {
-                    retryResults.set(item.path.join('.'), translation);
-                    this.log(`[${lang}] 重试成功: "${item.value}" => "${translation}"`, 'success');
+        // 将失败项分批处理
+        const batchSize = options.maxWorkers || 3;
+        const batches = [];
+        for (let i = 0; i < failedItems.length; i += batchSize) {
+            batches.push(failedItems.slice(i, i + batchSize));
+        }
+
+        // 并行处理每个批次
+        for (const batch of batches) {
+            const batchPromises = batch.map(async (item) => {
+                try {
+                    const translation = await this.translateText(
+                        translator,
+                        item.value,
+                        lang,
+                        options
+                    );
+                    
+                    if (translation && !translation.startsWith('[TRANSLATION_FAILED]')) {
+                        retryResults.set(item.path.join('.'), translation);
+                        this.log(`[${lang}] 重试成功: "${item.value}" => "${translation}"`, 'success');
+                    }
+                } catch (error) {
+                    this.log(`[${lang}] 重试失败: ${item.value}`, 'error');
                 }
-            } catch (error) {
-                this.log(`[${lang}] 重试失败: ${item.value}`, 'error');
-                // 继续处理下一个，不中断重试流程
+            });
+
+            // 等待当前批次完成
+            await Promise.all(batchPromises);
+            
+            // 批次间延迟
+            if (options.batchDelay) {
+                await new Promise(resolve => setTimeout(resolve, options.batchDelay));
             }
         }
         
+        this.log(`[${lang}] 重试完成，成功恢复 ${retryResults.size} 个翻译`, 'success');
         return retryResults;
     }
 
